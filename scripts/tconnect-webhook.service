@@ -1,0 +1,18 @@
+[Unit]
+Description=tconnectsync webhook listener
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/tconnect-webhook.py
+Environment=WEBHOOK_PORT=9876
+# REQUIRED: bearer token for POST /sync. Must match the app's TCONNECT_WEBHOOK_TOKEN
+# (in the ClearSugar app's .env). Generate a random value, e.g.:
+#   openssl rand -hex 32
+# There is no default — the service refuses to start without this set.
+Environment=WEBHOOK_TOKEN=CHANGE_ME_RANDOM_TOKEN
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

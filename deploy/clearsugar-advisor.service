@@ -1,0 +1,7 @@
+[Unit]
+Description=ClearSugar action-advisor check (shadow firing — no pushes unless ADVISOR_SHADOW=false)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/clearsugar/app/.env
+ExecStart=/usr/bin/curl -sf http://localhost:3000/api/advisor/check -H "X-API-Key: ${CLEARSUGAR_API_KEY}" --max-time 35

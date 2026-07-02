@@ -1,0 +1,15 @@
+[Unit]
+Description=ClearSugar Next.js App
+After=network.target mongod.service
+
+[Service]
+Type=simple
+User=clearsugar
+WorkingDirectory=/opt/clearsugar/app
+EnvironmentFile=/opt/clearsugar/app/.env
+ExecStart=/usr/bin/node server.js
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

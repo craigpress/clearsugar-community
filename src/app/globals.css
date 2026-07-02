@@ -1,0 +1,113 @@
+@import "tailwindcss";
+
+/* ClearSugar — Dark-first design for overnight monitoring */
+
+:root {
+  --background: #000000;
+  --bg-surface: #111111;
+  --bg-elevated: #1a1a1a;
+  --foreground: #e5e5e5;
+  --text-secondary: #a3a3a3;
+  --border: rgba(255, 255, 255, 0.06);
+  --border-hover: rgba(255, 255, 255, 0.12);
+
+  /* Glucose range colors (dark mode optimized) */
+  --glucose-in-range: #66bb6a;
+  --glucose-low: #ffb74d;
+  --glucose-high: #ffa726;
+  --glucose-urgent-low: #ef5350;
+  --glucose-urgent-high: #ef5350;
+
+  /* Functional colors */
+  --insulin-blue: #42a5f5;
+  --carb-amber: #ffa726;
+  --accent: #7c4dff;
+  --accent-hover: #651fff;
+
+  /* Chart */
+  --range-band: rgba(76, 175, 80, 0.08);
+  --grid-line: rgba(255, 255, 255, 0.04);
+}
+
+/* Slim, unobtrusive scrollbars for horizontal scroll containers (nav tab bar,
+   scrollable chart). Windows otherwise renders a full-height chrome scrollbar
+   that reads as a visual glitch on the dark UI. */
+.scrollbar-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+}
+.scrollbar-slim::-webkit-scrollbar {
+  height: 6px;
+}
+.scrollbar-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scrollbar-slim::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+.scrollbar-none {
+  scrollbar-width: none;
+}
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+
+.light {
+  --background: #fafafa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f5f5f5;
+  --foreground: #171717;
+  --text-secondary: #525252;
+  --border: rgba(0, 0, 0, 0.06);
+  --border-hover: rgba(0, 0, 0, 0.12);
+  --glucose-in-range: #388e3c;
+  --glucose-low: #f57c00;
+  --glucose-high: #fb8c00;
+  --glucose-urgent-low: #d32f2f;
+  --glucose-urgent-high: #d32f2f;
+  --insulin-blue: #1e88e5;
+  --carb-amber: #fb8c00;
+  --range-band: rgba(76, 175, 80, 0.06);
+  --grid-line: rgba(0, 0, 0, 0.06);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--bg-surface);
+  --color-elevated: var(--bg-elevated);
+  --color-muted: var(--text-secondary);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Tabular numerals for glucose display — numbers don't jitter */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* UX: minimum touch target — only for navigation buttons and links */
+nav button, header button, header a[href] {
+  min-height: 44px;
+}
+
+/* UX: minimum text floor — 11px for data, 12px for body content */
+td, th {
+  font-size: max(12px, inherit) !important;
+}
+.text-\[10px\], .text-\[9px\], .text-\[11px\] {
+  font-size: 12px !important;
+}
+/* Keep chart axis labels at 11px — they need to be compact */
+svg text {
+  font-size: max(11px, inherit);
+}

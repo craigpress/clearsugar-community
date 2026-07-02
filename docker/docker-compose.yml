@@ -1,0 +1,75 @@
+version: "3.8"
+
+# ClearSugar Community — Nightscout stack.
+#
+# Brings up MongoDB + Nightscout (with the Dexcom Share `bridge` plugin) so
+# ClearSugar has a CGM data source to read from. Generated/edited by
+# `npm run setup`; you can also copy and edit this by hand.
+#
+# Data flow:
+#   Dexcom Share account -> Nightscout `bridge` plugin -> Nightscout (Mongo) -> ClearSugar
+#
+# For local overrides (e.g. different ports), create
+# docker/docker-compose.override.yml — it is gitignored.
+
+services:
+  mongo:
+    image: mongo:6
+    container_name: clearsugar-mongo
+    restart: unless-stopped
+    volumes:
+      - mongo-data:/data/db
+    # Not published to the host — only nightscout talks to it, over the
+    # internal compose network.
+
+  nightscout:
+    image: nightscout/cgm-remote-monitor:latest
+    container_name: clearsugar-nightscout
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    ports:
+      # Exposed on localhost only. Put a reverse proxy with HTTPS in front of
+      # this if you need to reach it from outside the host — see
+      # docs/install/INSTALL.md.
+      - "127.0.0.1:1337:1337"
+    environment:
+      MONGO_CONNECTION: mongodb://mongo:27017/nightscout
+      API_SECRET: "REPLACE_WITH_A_LONG_RANDOM_SECRET" # min 12 chars; must match NIGHTSCOUT_API_SECRET in the ClearSugar .env
+      # `bridge` pulls from Dexcom Share; careportal/iob/cob/basal are used by
+      # ClearSugar's insights and prediction features.
+      ENABLE: "bridge careportal iob cob basal"
+      # Local-only stack behind localhost — fine to run Nightscout over plain
+      # HTTP here. If you expose Nightscout directly to the internet, put
+      # HTTPS (e.g. via a reverse proxy) in front instead of relying on this.
+      INSECURE_USE_HTTP: "true"
+      TZ: "America/New_York" # change to your timezone
+
+      # Dexcom Share bridge credentials — the same account/password you use
+      # in the Dexcom Share / Follow mobile app. Uncomment and fill in, or let
+      # `npm run setup` prefill these for you.
+      # BRIDGE_USER_NAME: "your-dexcom-share-username"
+      # BRIDGE_PASSWORD: "your-dexcom-share-password"
+
+  # Optional: tconnectsync pulls Tandem t:connect pump data into Nightscout.
+  # Uncomment if you have a Tandem pump + t:connect account. See
+  # docker/README.md and docs/install/INSTALL.md for details, or run it via
+  # pip instead (`pip install tconnectsync`) if you prefer not to use Docker.
+  #
+  # tconnectsync:
+  #   image: ghcr.io/jwoglom/tconnectsync/tconnectsync:latest
+  #   container_name: clearsugar-tconnectsync
+  #   restart: unless-stopped
+  #   depends_on:
+  #     - nightscout
+  #   environment:
+  #     TCONNECT_EMAIL: "your-tconnect-email"
+  #     TCONNECT_PASSWORD: "your-tconnect-password"
+  #     TCONNECT_REGION: "US" # or "EU"
+  #     NS_URL: "http://nightscout:1337"
+  #     NS_SECRET: "REPLACE_WITH_A_LONG_RANDOM_SECRET" # same value as nightscout's API_SECRET above
+  #     TIMEZONE_NAME: "America/New_York" # timezone of the pump
+  #   command: ["--auto-update"]
+
+volumes:
+  mongo-data:
