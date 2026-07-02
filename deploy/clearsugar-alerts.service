@@ -1,0 +1,7 @@
+[Unit]
+Description=ClearSugar alert check trigger
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/clearsugar/app/.env
+ExecStart=/usr/bin/curl -sf http://localhost:3000/api/alerts/check -H "X-API-Key: ${CLEARSUGAR_API_KEY}" --max-time 35

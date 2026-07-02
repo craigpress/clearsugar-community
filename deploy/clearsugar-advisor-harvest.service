@@ -1,0 +1,7 @@
+[Unit]
+Description=ClearSugar advisor outcome harvest (reads Nightscout 1-3h post-fire, no pushes)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/opt/clearsugar/app/.env
+ExecStart=/usr/bin/curl -sf http://localhost:3000/api/advisor/harvest -H "X-API-Key: ${CLEARSUGAR_API_KEY}" --max-time 60

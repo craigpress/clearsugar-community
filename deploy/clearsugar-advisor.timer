@@ -1,0 +1,9 @@
+[Unit]
+Description=ClearSugar action-advisor check (every 5 min — CGM cadence; catches fresh Tandem data promptly)
+
+[Timer]
+OnCalendar=*:1/5
+Persistent=true
+
+[Install]
+WantedBy=timers.target

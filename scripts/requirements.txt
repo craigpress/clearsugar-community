@@ -1,0 +1,10 @@
+# ClearSugar ML pipeline — pinned dependencies for reproducible training/serving.
+# Python 3.11+ required (uses zoneinfo from the stdlib).
+lightgbm==4.5.0
+numpy==1.26.4
+pandas==2.2.2
+requests==2.32.3
+onnxmltools==1.12.0
+skl2onnx==1.17.0
+onnxconverter-common==1.14.0
+onnxruntime==1.18.1
