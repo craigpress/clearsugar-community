@@ -1,0 +1,5 @@
+// Copy to Server.xcconfig and edit, or let `npm run setup` generate it.
+// Note the $() trick: xcconfig treats // as a comment, so URLs need it.
+CLEARSUGAR_SERVER_URL = https:/$()/your-server.example.com
+CLEARSUGAR_BUNDLE_PREFIX = com.example.clearsugar
+DEVELOPMENT_TEAM =

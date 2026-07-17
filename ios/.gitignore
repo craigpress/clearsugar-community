@@ -1,0 +1,17 @@
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+*.xcuserdatad/
+
+# Generated project (run `xcodegen generate`)
+ClearSugar.xcodeproj/
+
+# Per-install configuration (run `npm run setup` or copy Server.xcconfig.example)
+Config/Server.xcconfig
+
+# Build products
+build/
+DerivedData/
+
+# macOS
+.DS_Store

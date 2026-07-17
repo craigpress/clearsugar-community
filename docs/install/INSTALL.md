@@ -42,6 +42,10 @@ This interactive wizard (`scripts/setup.mjs`) will:
 - Optionally configure an AI insights provider (Anthropic API, Claude Code
   CLI, Codex CLI, a local Ollama model, or any OpenAI-compatible server)
 - Optionally configure remote access (see below)
+- Optionally configure the iOS companion app — writes
+  `ios/Config/Server.xcconfig` with your server URL and bundle identifier
+  (the app itself is built with Xcode on a Mac; see
+  [`ios/README.md`](../../ios/README.md))
 - Generate all required secrets and write `.env`
 
 Re-run `npm run setup` any time to reconfigure — it will back up your
