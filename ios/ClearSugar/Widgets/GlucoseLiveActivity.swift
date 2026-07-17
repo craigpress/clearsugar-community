@@ -21,18 +21,9 @@ struct GlucoseLiveActivity: Widget {
                 }
                 .foregroundStyle(glucoseColor(context.state.rangeCategory))
             } compactTrailing: {
-                Text(context.state.delta)
-                    .font(.system(.subheadline, design: .rounded))
-                    .foregroundStyle(.secondary)
+                compactTrailingView(context.state)
             } minimal: {
-                HStack(spacing: 0) {
-                    Text("\(context.state.sgv)")
-                        .font(.system(.subheadline, design: .rounded))
-                        .fontWeight(.bold)
-                    Text(context.state.trendArrow)
-                        .font(.system(.caption2))
-                }
-                .foregroundStyle(glucoseColor(context.state.rangeCategory))
+                minimalView(context.state)
             }
         }
     }
@@ -148,26 +139,32 @@ struct GlucoseLiveActivity: Widget {
         }
     }
 
-    // MARK: - Brand Colors
+    // MARK: - Compact / Minimal Island Slots
 
-    private func glucoseColor(_ category: RangeCategory) -> Color {
-        switch category {
-        case .urgentLow:  return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
-        case .low:        return Color(red: 0xFF / 255, green: 0xB7 / 255, blue: 0x4D / 255)
-        case .inRange:    return Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
-        case .high:       return Color(red: 0xFF / 255, green: 0xA7 / 255, blue: 0x26 / 255)
-        case .urgentHigh: return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    @ViewBuilder
+    private func compactTrailingView(_ state: GlucoseActivityAttributes.ContentState) -> some View {
+        #if compiler(>=6.4) // Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+        if #available(iOS 27.0, *) {
+            WidthAwareCompactTrailing(state: state)
+        } else {
+            compactTrailingContent(state)
         }
+        #else
+        compactTrailingContent(state)
+        #endif
     }
 
-    private func glucoseColorForValue(_ sgv: Int) -> Color {
-        switch sgv {
-        case ..<55:     return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
-        case 55..<70:   return Color(red: 0xFF / 255, green: 0xB7 / 255, blue: 0x4D / 255)
-        case 70...180:  return Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
-        case 181...250: return Color(red: 0xFF / 255, green: 0xA7 / 255, blue: 0x26 / 255)
-        default:        return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    @ViewBuilder
+    private func minimalView(_ state: GlucoseActivityAttributes.ContentState) -> some View {
+        #if compiler(>=6.4) // Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+        if #available(iOS 27.0, *) {
+            WidthAwareMinimal(state: state)
+        } else {
+            minimalContent(state)
         }
+        #else
+        minimalContent(state)
+        #endif
     }
 
     private func urgencyText(_ category: RangeCategory) -> String {
@@ -178,6 +175,94 @@ struct GlucoseLiveActivity: Widget {
         }
     }
 }
+
+// MARK: - Brand Colors
+
+private func glucoseColor(_ category: RangeCategory) -> Color {
+    switch category {
+    case .urgentLow:  return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    case .low:        return Color(red: 0xFF / 255, green: 0xB7 / 255, blue: 0x4D / 255)
+    case .inRange:    return Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
+    case .high:       return Color(red: 0xFF / 255, green: 0xA7 / 255, blue: 0x26 / 255)
+    case .urgentHigh: return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    }
+}
+
+private func glucoseColorForValue(_ sgv: Int) -> Color {
+    switch sgv {
+    case ..<55:     return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    case 55..<70:   return Color(red: 0xFF / 255, green: 0xB7 / 255, blue: 0x4D / 255)
+    case 70...180:  return Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
+    case 181...250: return Color(red: 0xFF / 255, green: 0xA7 / 255, blue: 0x26 / 255)
+    default:        return Color(red: 0xEF / 255, green: 0x53 / 255, blue: 0x50 / 255)
+    }
+}
+
+// MARK: - Compact / Minimal Content (shared by iOS 17 and iOS 27 paths)
+
+@ViewBuilder
+private func compactTrailingContent(_ state: GlucoseActivityAttributes.ContentState) -> some View {
+    Text(state.delta)
+        .font(.system(.subheadline, design: .rounded))
+        .foregroundStyle(.secondary)
+}
+
+@ViewBuilder
+private func minimalContent(_ state: GlucoseActivityAttributes.ContentState) -> some View {
+    HStack(spacing: 0) {
+        Text("\(state.sgv)")
+            .font(.system(.subheadline, design: .rounded))
+            .fontWeight(.bold)
+        Text(state.trendArrow)
+            .font(.system(.caption2))
+    }
+    .foregroundStyle(glucoseColor(state.rangeCategory))
+}
+
+// MARK: - iOS 27 Landscape Dynamic Island
+
+#if compiler(>=6.4)
+// Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+//
+// iOS 27 also shows the Dynamic Island in landscape, where the compact slots
+// are much narrower. `isDynamicIslandLimitedInWidth` is the WWDC26 environment
+// value name — re-verify it against the final iOS 27 SDK, as it was not
+// exposed in pre-release Xcode 26.x SDK interfaces.
+
+@available(iOS 27.0, *)
+private struct WidthAwareCompactTrailing: View {
+    @Environment(\.isDynamicIslandLimitedInWidth) private var isLimitedInWidth
+    let state: GlucoseActivityAttributes.ContentState
+
+    var body: some View {
+        if isLimitedInWidth {
+            // Tightest rendering: value + arrow already fill the leading
+            // slot — drop the delta entirely.
+            EmptyView()
+        } else {
+            compactTrailingContent(state)
+        }
+    }
+}
+
+@available(iOS 27.0, *)
+private struct WidthAwareMinimal: View {
+    @Environment(\.isDynamicIslandLimitedInWidth) private var isLimitedInWidth
+    let state: GlucoseActivityAttributes.ContentState
+
+    var body: some View {
+        if isLimitedInWidth {
+            // Tightest rendering: value only.
+            Text("\(state.sgv)")
+                .font(.system(.subheadline, design: .rounded))
+                .fontWeight(.bold)
+                .foregroundStyle(glucoseColor(state.rangeCategory))
+        } else {
+            minimalContent(state)
+        }
+    }
+}
+#endif
 
 // MARK: - Sparkline View
 

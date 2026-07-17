@@ -297,7 +297,14 @@ final class AlertManager: ObservableObject {
     /// pending notification, so it only fires when the whole update pipeline
     /// goes quiet. This works even while the app is suspended and the
     /// server-side push pipeline is down.
-    func rearmDataWatchdog() {
+    ///
+    /// Pass the fresh reading so the iOS 26+ urgent-low AlarmKit alarm is
+    /// evaluated on the same three success paths.
+    func rearmDataWatchdog(latest reading: GlucoseReading? = nil) {
+        if let reading {
+            UrgentLowAlarmGate.evaluate(reading, urgentLowThreshold: thresholdUrgentLow)
+        }
+
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.watchdogIdentifier])
 

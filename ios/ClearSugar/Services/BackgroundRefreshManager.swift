@@ -108,7 +108,7 @@ final class BackgroundRefreshManager: Sendable {
                 // Evaluate alerts + re-arm the dead-man watchdog
                 await MainActor.run {
                     AlertManager.shared.evaluate(reading)
-                    AlertManager.shared.rearmDataWatchdog()
+                    AlertManager.shared.rearmDataWatchdog(latest: reading)
                 }
 
                 recordOutcome(success: true)

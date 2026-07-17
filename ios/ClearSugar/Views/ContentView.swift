@@ -521,7 +521,7 @@ struct ContentView: View {
             // Evaluate alerts (handles haptics internally) + re-arm dead-man watchdog
             await MainActor.run {
                 AlertManager.shared.evaluate(newReading)
-                AlertManager.shared.rearmDataWatchdog()
+                AlertManager.shared.rearmDataWatchdog(latest: newReading)
             }
 
             // Update Live Activity (Dynamic Island + Lock Screen)

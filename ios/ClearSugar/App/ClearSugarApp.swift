@@ -170,7 +170,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
                     WidgetCenter.shared.reloadAllTimelines()
 
                     // Dead-man watchdog: fires if no data arrives for 25 min
-                    AlertManager.shared.rearmDataWatchdog()
+                    AlertManager.shared.rearmDataWatchdog(latest: reading)
                 }
 
                 // Push to Watch

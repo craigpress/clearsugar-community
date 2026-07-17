@@ -245,9 +245,12 @@ The [`ios/`](ios/) directory contains a native iPhone + Apple Watch companion ap
 
 - **Glanceable everywhere** — home-screen and lock-screen widgets, watch complications,
   and a Live Activity with the current glucose, trend, and prediction on the Lock
-  Screen / Dynamic Island.
+  Screen / Dynamic Island. On iOS 27 the Live Activity also surfaces automatically in
+  CarPlay, StandBy, and the Apple Watch Smart Stack.
 - **Alerts on your wrist** — urgent low/high, stale-data, and pump alerts with snooze
   actions and configurable thresholds synced to the server.
+- **Urgent-low alarm (iOS 26+)** — an opt-in AlarmKit alarm that sounds through
+  Silent mode and Focus, with the same priority as the built-in Clock app.
 - **Yours end to end** — you build it in Xcode against **your** server; there is no App
   Store listing, no third-party service, and no telemetry.
 
