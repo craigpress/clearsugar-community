@@ -41,8 +41,8 @@ next-env.d.ts
 tmp_*.json
 tmp_audit/
 
-# iOS app (moved to a separate companion-app repo)
-ios/
+# Private iOS working copy (the community iOS app lives in ios/ and IS tracked;
+# its own ios/.gitignore excludes generated projects and Server.xcconfig)
 clearsugar-ios/
 
 # ONNX models — inference runs on the ML prediction server, not in browser
