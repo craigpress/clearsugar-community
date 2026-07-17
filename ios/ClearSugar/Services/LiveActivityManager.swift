@@ -152,6 +152,10 @@ final class LiveActivityManager {
         }
     }
 
+    // TODO(iOS 18 broadcast channels): ActivityKit broadcast push channels
+    // could replace per-device token registration when several followers watch
+    // the same patient — needs server-side channel management first; deferred.
+
     /// Send the Live Activity push token to the ClearSugar server so it can
     /// drive updates via APNs. Skipped when no credential is stored.
     private func registerPushToken(_ token: String) async {

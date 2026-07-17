@@ -20,6 +20,25 @@ struct GlucoseComplicationEntry: TimelineEntry {
         return "+0"
     }
 
+    /// Smart Stack / complication relevance, scaled by urgency so urgent
+    /// readings float the complication to the top. TimelineEntryRelevance is
+    /// the per-entry relevance mechanism for accessory-family widgets on
+    /// watchOS 9+; the newer RelevanceKit donation API (watchOS 11+) is a
+    /// separate mechanism and doesn't replace per-entry scores.
+    var relevance: TimelineEntryRelevance? {
+        let score: Float
+        if minutesAgo > 15 {
+            score = 0 // stale — don't promote old data
+        } else {
+            switch rangeCategory {
+            case .urgentLow, .urgentHigh: score = 100
+            case .low, .high: score = 70
+            case .inRange: score = 20
+            }
+        }
+        return TimelineEntryRelevance(score: score)
+    }
+
     static let placeholder = GlucoseComplicationEntry(
         date: .now,
         sgv: 120,

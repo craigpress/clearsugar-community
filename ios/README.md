@@ -85,6 +85,20 @@ calls of its own, so it works on any account tier. Complications can be added
 from the watch face gallery once the watch app has received data at least
 once.
 
+## iOS version features
+
+The app works fully on iOS 17+; newer OS versions add extras, all
+availability-gated, so nothing below changes behavior on older devices:
+
+- **iOS 26+:** opt-in urgent-low AlarmKit alarm (Settings → Alert Settings)
+  that sounds through Silent/Focus with full-screen Stop and Open app buttons.
+- **iOS 27:** extra-large-portrait home screen widget (iPad/Mac dashboards),
+  a tightened Dynamic Island layout for landscape, and automatic Live
+  Activity surfacing on CarPlay, StandBy, and the watch Smart Stack — the
+  last three need no setup. The two SDK-gated code paths (extra-large widget,
+  landscape island) need Xcode 27 to compile in; older Xcode compiles them
+  out cleanly.
+
 ## What needs a paid Apple Developer account
 
 | Feature | Free account | Paid account |

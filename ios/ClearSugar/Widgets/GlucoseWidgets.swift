@@ -369,14 +369,42 @@ struct GlucoseMediumWidget: Widget {
         }
         .configurationDisplayName("Glucose Trend")
         .description("Glucose with sparkline chart and details.")
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies(Self.families)
+    }
+
+    private static var families: [WidgetFamily] {
+        var families: [WidgetFamily] = [.systemMedium]
+        #if compiler(>=6.4) // Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+        if #available(iOS 27.0, *) {
+            // 4x6 iPad/Mac dashboard widget, new on iOS 27.
+            families.append(.systemExtraLargePortrait)
+        }
+        #endif
+        return families
     }
 }
 
 private struct GlucoseMediumView: View {
+    @Environment(\.widgetFamily) private var family
     let entry: GlucoseWidgetEntry
 
     var body: some View {
+        #if compiler(>=6.4) // Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+        if #available(iOS 27.0, *) {
+            if family == .systemExtraLargePortrait {
+                GlucoseExtraLargePortraitView(entry: entry)
+            } else {
+                mediumBody
+            }
+        } else {
+            mediumBody
+        }
+        #else
+        mediumBody
+        #endif
+    }
+
+    private var mediumBody: some View {
         HStack(spacing: 8) {
             // Left column: glucose + arrow + IOB/COB
             VStack(alignment: .leading, spacing: 4) {
@@ -430,6 +458,67 @@ private struct GlucoseMediumView: View {
         .opacity(entry.isStale ? 0.6 : 1.0)
     }
 }
+
+// MARK: - Extra-Large Portrait View (iOS 27, iPad/Mac dashboard)
+
+#if compiler(>=6.4)
+// Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
+@available(iOS 27.0, *)
+private struct GlucoseExtraLargePortraitView: View {
+    let entry: GlucoseWidgetEntry
+
+    var body: some View {
+        VStack(spacing: 16) {
+            // Chart on top
+            if !entry.sparklineValues.isEmpty {
+                WidgetSparkline(
+                    historyValues: entry.sparklineValues,
+                    predictionValues: entry.predictionValues.isEmpty ? nil : entry.predictionValues,
+                    showYAxis: true,
+                    compact: false
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                Spacer()
+            }
+
+            // Stat row below: glucose + arrow + delta left, IOB/COB/age right
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text("\(entry.sgv)")
+                    .font(.system(size: 72, weight: .bold, design: .rounded))
+                    .foregroundStyle(valueColor(for: entry))
+                    .minimumScaleFactor(0.7)
+                    .lineLimit(1)
+                Text(entry.trendArrow)
+                    .font(.system(size: 36))
+                    .foregroundStyle(valueColor(for: entry))
+                Text(entry.deltaString)
+                    .font(.system(size: 26, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let iob = entry.iob {
+                        Text(iob)
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundStyle(insulinBlue)
+                    }
+                    if let cob = entry.cob {
+                        Text(cob)
+                            .font(.system(size: 20, weight: .semibold, design: .rounded))
+                            .foregroundStyle(carbAmber)
+                    }
+                    Text(entry.ageText)
+                        .font(.system(size: 14, weight: entry.isStale ? .bold : .regular, design: .rounded))
+                        .foregroundStyle(entry.isStale ? .red : .secondary)
+                }
+            }
+        }
+        .opacity(entry.isStale ? 0.6 : 1.0)
+    }
+}
+#endif
 
 // MARK: - Accessory Circular Widget (Lock Screen)
 

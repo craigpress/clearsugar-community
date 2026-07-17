@@ -6,6 +6,8 @@ struct SettingsView: View {
     @AppStorage("alertsLowEnabled") private var alertsLowEnabled = true
     @AppStorage("alertsHighEnabled") private var alertsHighEnabled = true
     @AppStorage("alertsUrgentEnabled") private var alertsUrgentEnabled = true
+    @AppStorage(UrgentLowAlarmGate.enabledKey) private var urgentLowAlarmEnabled = false
+    @State private var urgentLowAlarmDenied = false
 
     // Glucose thresholds
     @AppStorage("thresholdUrgentLow") private var thresholdUrgentLow: Double = 55
@@ -80,6 +82,18 @@ struct SettingsView: View {
         .onChange(of: thresholdLow) { _, _ in syncThresholds() }
         .onChange(of: thresholdHigh) { _, _ in syncThresholds() }
         .onChange(of: thresholdUrgentHigh) { _, _ in syncThresholds() }
+        .onChange(of: urgentLowAlarmEnabled) { _, enabled in
+            guard enabled else { return }
+            Task {
+                let granted = await UrgentLowAlarmGate.requestAuthorization()
+                if granted {
+                    urgentLowAlarmDenied = false
+                } else {
+                    urgentLowAlarmEnabled = false
+                    urgentLowAlarmDenied = true
+                }
+            }
+        }
     }
 
     private func syncThresholds() {
@@ -352,6 +366,20 @@ struct SettingsView: View {
                     iconColor: urgentRed,
                     isOn: $alertsUrgentEnabled
                 )
+
+                if #available(iOS 26.0, *) {
+                    Divider().background(borderColor)
+
+                    alertToggle(
+                        title: "Urgent-Low Alarm",
+                        subtitle: urgentLowAlarmDenied
+                            ? "Alarm permission denied \u{2014} allow ClearSugar in Settings > Alarms"
+                            : "Sounds through Silent at or below \(Int(thresholdUrgentLow)) mg/dL",
+                        icon: "alarm.waves.left.and.right.fill",
+                        iconColor: urgentRed,
+                        isOn: $urgentLowAlarmEnabled
+                    )
+                }
             }
             .background(surfaceColor)
             .clipShape(RoundedRectangle(cornerRadius: 16))
