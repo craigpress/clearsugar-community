@@ -11,6 +11,10 @@ enum UrgentLowAlarmGate {
 
     @MainActor
     static func evaluate(_ reading: GlucoseReading, urgentLowThreshold: Int) {
+        // Defence in depth: AlertManager already gates on this, but the alarm
+        // sounds at full volume through Silent and Focus, so no future caller
+        // should be able to arm it from a sensor-error sentinel (sgv = 0).
+        guard reading.isValid else { return }
         if #available(iOS 26.0, *) {
             UrgentLowAlarmManager.shared.evaluate(reading, urgentLowThreshold: urgentLowThreshold)
         }

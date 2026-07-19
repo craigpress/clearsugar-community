@@ -11,6 +11,56 @@ export function safeEqual(a: string, b: string): boolean {
   return timingSafeEqual(ab, bb);
 }
 
+/** Who the caller is, when the request carried a personal credential. */
+export interface AuthIdentity {
+  /** Subject claim — the username (see api/auth/mobile/token). Stable across
+   *  APNs token rotation, app reinstall, and device replacement, which is what
+   *  makes it usable as a durable identity for push routing. */
+  sub: string;
+  name?: string;
+  role?: string;
+}
+
+/**
+ * Returns the caller's identity, or null for machine callers (X-API-Key), which
+ * are shared and identify nobody.
+ *
+ * Separate from requireApiAuth so existing `const denied = await
+ * requireApiAuth(req); if (denied) return denied;` call sites keep working
+ * unchanged — only routes that care who is calling opt in.
+ *
+ * Never use this for authorization; it does not verify the caller is allowed to
+ * do anything. Call requireApiAuth first, then this for attribution.
+ */
+export async function getAuthIdentity(req: Request): Promise<AuthIdentity | null> {
+  const authHeader = req.headers.get("authorization");
+  if (authHeader?.startsWith("Bearer ")) {
+    const secret = process.env.MOBILE_JWT_SECRET;
+    if (!secret) return null;
+    try {
+      const key = new TextEncoder().encode(secret);
+      const { payload } = await jwtVerify(authHeader.slice(7), key, {
+        issuer: "clearsugar",
+        audience: "clearsugar-api",
+        algorithms: ["HS256"],
+      });
+      if (typeof payload.sub !== "string" || !payload.sub) return null;
+      return {
+        sub: payload.sub,
+        name: typeof payload.name === "string" ? payload.name : undefined,
+        role: typeof payload.role === "string" ? payload.role : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const session = await auth();
+  const who = session?.user?.name ?? session?.user?.email;
+  if (who) return { sub: who, name: session?.user?.name ?? undefined };
+  return null;
+}
+
 /**
  * Validates an API request via:
  *   1. X-API-Key header (for cron/systemd timers, machine clients)

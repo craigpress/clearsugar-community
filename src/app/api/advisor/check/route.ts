@@ -11,6 +11,7 @@ import type { AdvisoryAction } from "@/lib/prediction/advisor-types";
 import { isPumpSleep, getCiqMode } from "@/lib/prediction/ciq-modes";
 import { pushAlertNotification } from "@/lib/apns";
 import { loadAlertTokens } from "@/app/api/push/register-alert/route";
+import { loadAlertPrefs, loadIdentities, parentTokens } from "@/app/api/alerts/preferences/route";
 
 export const dynamic = "force-dynamic";
 
@@ -102,9 +103,18 @@ export async function GET(req: Request) {
     // decision, so it goes ONLY to the designated high-alert recipient(s). If
     // none is configured it is NOT delivered (never blast an insulin suggestion
     // to every device). All other advisories go to every registered device.
+    // Prefer role assignments: they resolve through the auth subject, so they
+    // survive an APNs token rotation (a TestFlight/app update mints a new token,
+    // and a hand-maintained token list silently goes stale at exactly that
+    // moment). Falls back to the legacy token file while nothing is assigned.
+    const prefsForRouting = shadow ? {} : await loadAlertPrefs();
+    const identitiesForRouting = shadow ? {} : await loadIdentities();
+    const assignedParents = parentTokens(prefsForRouting, identitiesForRouting);
     const highRecipients = shadow
       ? []
-      : await loadJSON<string[]>("push/high-alert-recipients.json", []);
+      : assignedParents.length > 0
+        ? assignedParents
+        : await loadJSON<string[]>("push/high-alert-recipients.json", []);
     // Option 3 / sleep wake-gate: use the pump's actual Sleep schedule (22:00–
     // 05:00, from the published pump-state) as the overnight quiet-hours window,
     // replacing the hardcoded 22:00–07:00. Falls back to
@@ -142,12 +152,25 @@ export async function GET(req: Request) {
             sleepQuiet && a.tier !== "T4_critical" ? "passive" : TIER_INTERRUPTION[a.tier];
           const results = await Promise.allSettled(
             targets.map((t) =>
-              pushAlertNotification(t, `ClearSugar: ${a.headline}`, a.orElse, undefined, level)
+              // No app-name prefix: iOS renders the app name above every notification
+              // already, so prefixing the title duplicated it and cost ~12 chars of
+              // lock-screen headline.
+              pushAlertNotification(t, a.headline, a.orElse, undefined, level)
             )
           );
           attempted = targets.length;
           delivered = results.filter((r) => r.status === "fulfilled").length;
           pushed += delivered;
+          // A stale recipient list is indistinguishable from a correct one until
+          // delivery is counted: targets.length > 0 with every push rejected (e.g.
+          // tokens invalidated by an app update) reaches nobody while sailing past
+          // the targets.length === 0 guard above. Insulin advice silently reaching
+          // no one is the failure this whole path exists to avoid.
+          if (isHighSide && delivered === 0) {
+            console.error(
+              `advisor: ${a.id} (high-side insulin) reached NOBODY — ${attempted} target(s), all rejected. Check the high-alert recipient assignment`
+            );
+          }
           for (const r of results) {
             if (r.status === "rejected") {
               deliveryFailures += 1;

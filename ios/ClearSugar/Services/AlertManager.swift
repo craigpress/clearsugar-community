@@ -11,6 +11,9 @@ final class AlertManager: ObservableObject {
 
     private var lastUrgentAlertDate: Date?
     private var lastWarningAlertDate: Date?
+    private var lastPumpStaleAlertDate: Date?
+    /// Long, because a pump-sync outage lasts hours and repeating adds nothing.
+    private let pumpStaleCooldownInterval: TimeInterval = 3 * 60 * 60
     private let urgentRepeatInterval: TimeInterval = 60
     private let warningCooldownInterval: TimeInterval = 30 * 60 // 30 minutes
 
@@ -129,6 +132,22 @@ final class AlertManager: ObservableObject {
     // MARK: - Evaluate Reading
 
     func evaluate(_ reading: GlucoseReading) {
+        // A sensor error is not a glucose value. Dexcom/Nightscout emit sgv = 0
+        // on sensor error, and the WatchConnectivity init defaults a missing
+        // sgv to 0. Zero is below every low threshold, so without this gate a
+        // sensor fault fires "urgent low - 0 mg/dL - treat with fast carbs",
+        // repeats it, and arms the AlarmKit alarm that sounds through Silent.
+        // Telling someone to treat a low that is not happening is the one
+        // failure this path must never produce.
+        //
+        // Staleness checks below still run: invalid data is exactly when
+        // "no glucose data" is the alert worth sending.
+        guard reading.isValid else {
+            evaluateStaleness(reading)
+            lastAlertedSgv = reading.sgv
+            return
+        }
+
         let sgv = reading.sgv
 
         // Determine range category using customizable thresholds
@@ -167,18 +186,23 @@ final class AlertManager: ObservableObject {
             )
         }
 
-        // Check for stale data
-        if reading.minutesAgo > 15 {
-            sendStaleDataAlert(minutesAgo: reading.minutesAgo)
-        }
+        evaluateStaleness(reading)
+        lastAlertedSgv = reading.sgv
+    }
 
-        // Check for stale pump
+    /// CGM staleness is owned by the dead-man watchdog, which fires ONCE and
+    /// works while the app is suspended. A separate >15-min check here had no
+    /// cooldown, so it re-alerted with sound on every evaluate() - every poll
+    /// while foregrounded and every background refresh - for the whole gap.
+    ///
+    /// Pump staleness is 180 min, not 30: pump data reaches the cloud in long
+    /// batches, so >30 min is the NORMAL state and alerting on it means
+    /// alerting on healthy operation.
+    private func evaluateStaleness(_ reading: GlucoseReading) {
         if let pumpStale = reading.pumpIsStale, pumpStale,
-           let pumpMins = reading.pumpStaleMinutes, pumpMins > 30 {
+           let pumpMins = reading.pumpStaleMinutes, pumpMins > 180 {
             sendPumpStaleAlert(minutesStale: pumpMins)
         }
-
-        lastAlertedSgv = reading.sgv
     }
 
     // MARK: - Urgent Alert
@@ -249,27 +273,16 @@ final class AlertManager: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    // MARK: - Stale Data Alert
-
-    private func sendStaleDataAlert(minutesAgo: Int) {
-        let content = UNMutableNotificationContent()
-        content.title = "Glucose Data Stale"
-        content.body = "Last reading was \(minutesAgo) minutes ago. Check CGM connection."
-        content.sound = .default
-        content.interruptionLevel = .active
-        content.categoryIdentifier = "GLUCOSE_WARNING"
-
-        let request = UNNotificationRequest(
-            identifier: "stale-data",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request)
-    }
 
     // MARK: - Pump Stale Alert
 
     private func sendPumpStaleAlert(minutesStale: Int) {
+        // Cooldown, which this path never had. Re-adding a request with an
+        // existing identifier replaces the banner but still re-delivers sound.
+        if let last = lastPumpStaleAlertDate,
+           Date().timeIntervalSince(last) < pumpStaleCooldownInterval { return }
+        lastPumpStaleAlertDate = Date()
+
         let content = UNMutableNotificationContent()
         content.title = "Pump Connection Lost"
         content.body = "No pump data for \(minutesStale) minutes. The pump algorithm may not be adjusting insulin."
