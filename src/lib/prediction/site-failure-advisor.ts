@@ -332,9 +332,9 @@ export function evaluateSiteFailure(input: AdvisorInput): SiteFailureResult {
     tier: "T3_urgent",
     severity: "high",
     leadTimeMin,
-    orElse: `insulin isn't absorbing — BG ${bgNow} and not responding to ${iobStr} u on board`,
+    orElse: `BG ${bgNow} and not responding to ${iobStr}U on board. Correct by pen if needed.`,
     magnitudeGrams: null, // direction only — NEVER an insulin number
-    headline: "Consider a site change / pen correction — pump insulin isn't absorbing",
+    headline: "Consider a site change — insulin not absorbing",
     confidence: 0.8,
     staleness: { pumpStaleMin: null, cgmStaleMin: null },
     evidence,

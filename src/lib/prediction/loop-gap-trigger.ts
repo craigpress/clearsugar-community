@@ -415,9 +415,9 @@ export function evaluateLowTrigger(
   const magnitudeGrams = severe ? 20 : 15;
 
   const orElse =
-    `heading to ~${Math.round(projectedMin)} by ${hh}:${mm} ` +
-    `even with the pump's basal off`;
-  const headline = `~${magnitudeGrams}g fast carbs now`;
+    `Heading to ~${Math.round(projectedMin)} by ${hh}:${mm}, ` +
+    `even with the pump's basal off.`;
+  const headline = `${magnitudeGrams}g fast carbs now`;
 
   // staleness
   const cgmStaleMin = Math.max(0, Math.round((now - latest.date) / MIN));

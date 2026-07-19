@@ -333,11 +333,14 @@ export function evaluateHighTrigger(input: AdvisorInput): AdvisoryAction | null 
   if (veryHigh) confidence += 0.1;
   confidence = Math.max(0.3, Math.min(0.9, confidence));
 
+  // Headline becomes the push title, so it stays short enough to survive a lock
+  // screen; orElse is the body and carries the evidence. Sentence case
+  // throughout — see the sibling advisories in loop-gap-trigger and
+  // site-failure-advisor.
   const orElse =
-    `BG ~${Math.round(curSgv)} and holding high; even with Control-IQ dosing its ` +
-    `hardest it's projected ~${Math.round(roll.endBg)} in ${HIGH_HORIZON_MIN} min. ` +
-    `A manual pen correction is needed — the loop can't bring this one down.`;
-  const headline = "manual correction now (use pump bolus calc)";
+    `BG ~${Math.round(curSgv)} and holding. Control-IQ is dosing its hardest and still ` +
+    `projects ~${Math.round(roll.endBg)} in ${HIGH_HORIZON_MIN} min. Use the pump bolus calculator.`;
+  const headline = "Manual correction needed";
 
   const evidence = [
     `curBG ${Math.round(curSgv)} ≥ gate ${eventBg}${night ? " (night bar)" : ""}`,

@@ -108,7 +108,9 @@ describe("evaluateSiteFailure", () => {
     // NEVER an insulin number — direction only.
     expect(a.magnitudeGrams).toBeNull();
     expect(a.leadTimeMin).toBeGreaterThan(0);
-    expect(a.orElse).toContain("isn't absorbing");
+    expect(a.orElse).toContain("not responding");
+    // The headline must keep naming the ACTION, not just the condition —
+    // it is the push title and is often all that is read.
     expect(a.headline).toContain("Consider a site change");
     expect(a.evidence.length).toBeGreaterThan(0);
 

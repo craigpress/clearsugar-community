@@ -75,8 +75,19 @@ struct GlucoseReading: Codable, Sendable {
         }
     }
 
+    /// Whether `sgv` is a real measurement rather than a sensor-error sentinel.
+    ///
+    /// Dexcom/Nightscout emit 0 on sensor error, and the WatchConnectivity init
+    /// below defaults a missing `sgv` to 0. Zero is numerically "below every
+    /// low threshold", so every consumer that compares thresholds MUST gate on
+    /// this first — otherwise a sensor fault reads as the most severe possible
+    /// hypo. See AlertManager.evaluate and UrgentLowAlarmGate.evaluate.
+    var isValid: Bool { sgv > 0 && sgv < 600 }
+
     var rangeCategory: RangeCategory {
-        guard sgv > 0 && sgv < 600 else { return .urgentLow } // Sensor error
+        // Display-only fallback. Alert and alarm paths gate on `isValid` and
+        // never reach this; do not add clinical decisions here.
+        guard isValid else { return .urgentLow } // Sensor error
         switch sgv {
         case ..<55:     return .urgentLow
         case 55..<70:   return .low

@@ -128,14 +128,22 @@ function staleNotice(pumpStaleMin: number, now: number, masked: AdvisoryAction):
     actionType: "fingerstick_verify",
     actionClass: "verify",
     rootCause: "stale_data",
-    tier: "T2_actionable",
+    // T1_nudge (passive) since 2026-07-19, was T2_actionable. 30-day outcome
+    // harvest: n=25, 48% false_alarm_self_resolved, 0% ciq_absorbed — it never
+    // describes a real glucose event, and it was 20% of all pushes. Staleness
+    // itself is already covered by six other detectors (iOS >15min stale, iOS
+    // >30min pump-stale, the iOS 25-min dead-man watchdog, and three HA
+    // watchdogs), several of which keep working when this server is the thing
+    // that died. Passive keeps the "something may be developing behind stale
+    // data" signal visible in notification centre without interrupting.
+    tier: "T1_nudge",
     severity: "moderate",
     leadTimeMin: 0,
     orElse:
-      `A possible ${masked.rootCause.replace(/_/g, " ")} was developing but pump data is ` +
-      `${stale} min stale — can't confirm. Verify BG and pump/site manually.`,
+      `A possible ${masked.rootCause.replace(/_/g, " ")} was developing, but pump data is ` +
+      `${stale} min stale. Check BG and the site manually.`,
     magnitudeGrams: null,
-    headline: "Verify pump & BG — data stale while an issue may be developing",
+    headline: "Check BG — pump data stale",
     confidence: 1,
     staleness: { pumpStaleMin: stale, cgmStaleMin: null },
     evidence: [
