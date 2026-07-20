@@ -27,7 +27,7 @@ export type DeliveryTier =
   | "T1_nudge" // non-waking banner, batched
   | "T2_actionable" // banner + sound, time-sensitive
   | "T3_urgent" // wake-worthy phone push
-  | "T4_critical"; // highest wake tier (severe) — loudest phone push; NO house alarm
+  | "T4_critical"; // highest tier (severe) — loudest PHONE push; no house alarm exists
 
 export type AdvisorSeverity = "info" | "low" | "moderate" | "high" | "urgent";
 
@@ -94,7 +94,10 @@ export interface AdvisorInput {
   pumpState?: PumpState | null;
 }
 
-/** Tier → iOS interruption-level (T4 = loudest phone push; no house siren / Apple Critical). */
+/** Tier → iOS interruption-level. Every tier delivers to a phone; T4 is simply
+ *  the loudest phone channel. No house siren exists, and Apple Critical Alerts
+ *  require an entitlement this build does not assume, so nothing here is louder
+ *  than time-sensitive. */
 export const TIER_INTERRUPTION: Record<DeliveryTier, AlertInterruptionLevel> = {
   T0_silent: "passive",
   T1_nudge: "passive",

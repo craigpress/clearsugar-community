@@ -400,7 +400,8 @@ export function evaluateLowTrigger(
   const severe = severeFloor || projectedMin < SEVERE_LOW;
 
   // Tiering (recalibrated 2026-06-26): a severe-projected low is the only
-  // night-wake event — T4_critical (loudest phone push; NO house alarm). Every
+  // night event — T4_critical (loudest PHONE push; there is no house alarm or
+  // siren in this system). Every
   // other impending low is T2_actionable. The night wake-gate in the firing path
   // non-T4 night fires to passive; a deepening low re-fires and escalates to T4
   // on the next 5-min tick, so a worsening night low still gets the wake.
