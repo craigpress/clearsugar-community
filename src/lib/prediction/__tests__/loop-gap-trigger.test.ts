@@ -78,7 +78,7 @@ describe("evaluateLowTrigger — validated loop-gap low trigger", () => {
     expect(action!.magnitudeGrams!).toBeGreaterThan(0);
     expect(action!.leadTimeMin).toBeGreaterThanOrEqual(0);
     expect(action!.leadTimeMin).toBeLessThanOrEqual(30);
-    // severe projection => house-wake tier (T4 / HA siren)
+    // severe projection => highest phone tier (T4). No house siren exists.
     expect(action!.tier).toBe("T4_critical");
     expect(action!.headline).toMatch(/fast carbs now/);
     expect(action!.orElse).toMatch(/basal off/);

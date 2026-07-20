@@ -144,10 +144,16 @@ export async function GET(req: Request) {
           );
         }
         if (targets.length > 0) {
-          // Wake-gate: during the pump's Sleep window, only a severe-projected low
-          // (T4_critical) may use a waking channel; every other tier drops to
-          // passive so non-severe night fires never wake the house. Outside the
-          // Sleep window each tier keeps its normal interruption level.
+          // Night quiet-gate: during the pump's Sleep window, only a
+          // severe-projected low (T4_critical) may use an interrupting channel;
+          // every other tier drops to passive so non-severe night fires do not
+          // disturb a sleeping phone. Outside the Sleep window each tier keeps
+          // its normal interruption level.
+          //
+          // NOTE: every alert in this system lands on a PHONE. There is no
+          // house alarm, siren, or whole-house actuator of any kind.
+          // "Waking" here means the loudest phone channel available
+          // (time-sensitive), nothing more.
           const level =
             sleepQuiet && a.tier !== "T4_critical" ? "passive" : TIER_INTERRUPTION[a.tier];
           const results = await Promise.allSettled(
