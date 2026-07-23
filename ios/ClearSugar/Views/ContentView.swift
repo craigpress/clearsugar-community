@@ -7,7 +7,7 @@ struct ContentView: View {
     @State private var reading: GlucoseReading?
     @State private var error: String?
     @State private var isLoading = false
-    @State private var refreshTimer: Timer?
+    @State private var refreshScheduler = RefreshScheduler(interval: 150) // 2.5 min — Dexcom updates every 5 min
     @State private var showWebDashboard = false
     @State private var patientName: String = AppConfig.patientDisplayName
     @State private var authManager = AuthManager.shared
@@ -74,8 +74,7 @@ struct ContentView: View {
             startAutoRefresh()
         }
         .onDisappear {
-            refreshTimer?.invalidate()
-            refreshTimer = nil
+            refreshScheduler.stop()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active, store.minutesSinceLastFetch >= 1 {
@@ -603,10 +602,7 @@ struct ContentView: View {
     }
 
     private func startAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 150, repeats: true) { [weak refreshTimer] _ in // 2.5 min — Dexcom updates every 5 min
-            // Guard against firing after invalidation
-            guard refreshTimer != nil else { return }
+        refreshScheduler.start {
             Task {
                 await refreshChartData()
                 await refresh()
