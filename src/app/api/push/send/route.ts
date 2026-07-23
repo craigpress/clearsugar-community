@@ -11,6 +11,8 @@ import { loadAlertTokens } from "@/app/api/push/register-alert/route";
 import { loadLiveActivityTokens, saveLiveActivityTokens } from "@/app/api/push/register/route";
 import { loadSnoozeState, saveSnoozeState } from "@/app/api/alerts/snooze/route";
 import { loadAlertPrefs, getDevicePrefs } from "@/app/api/alerts/preferences/route";
+import { classifyGlucose } from "@/lib/alert-classify";
+import { isValidSgv, sanitizeSparkline } from "@/lib/glucose-validity";
 
 export const dynamic = "force-dynamic";
 
@@ -22,15 +24,6 @@ const ALERT_CONFIG: Record<string, { cooldownMs: number; category: string }> = {
   high:       { cooldownMs: 30 * 60 * 1000, category: "GLUCOSE_WARNING" },
   urgentHigh: { cooldownMs: 15 * 60 * 1000, category: "URGENT_GLUCOSE" },
 };
-
-/** Classify glucose against a device's thresholds */
-function classifyGlucose(sgv: number, prefs: { thresholdUrgentLow: number; thresholdLow: number; thresholdHigh: number; thresholdUrgentHigh: number }): string | null {
-  if (sgv < prefs.thresholdUrgentLow) return "urgentLow";
-  if (sgv < prefs.thresholdLow) return "low";
-  if (sgv >= prefs.thresholdUrgentHigh) return "urgentHigh";
-  if (sgv >= prefs.thresholdHigh) return "high";
-  return null;
-}
 
 const GLUCOSE_ALERT_STATE_KEY = "push/glucose-alert-state.json";
 
@@ -66,11 +59,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get Live Activity push tokens from stored registrations
+  // Load BOTH registration stores up front. A device may register for
+  // threshold alerts without ever starting a Live Activity — alert delivery
+  // must not depend on Live Activity registrations existing.
   const storedTokenMap = await loadLiveActivityTokens();
   const tokens = Object.keys(storedTokenMap);
+  const alertTokenMap = await loadAlertTokens();
 
-  if (tokens.length === 0) {
+  if (tokens.length === 0 && Object.keys(alertTokenMap).length === 0) {
     return NextResponse.json({
       sent: 0,
       reason: "No push tokens. Open the app to register.",
@@ -91,6 +87,17 @@ export async function GET(req: Request) {
     const latest = entries[0];
     if (!latest) throw new Error("No glucose entries");
 
+    // Valid-data invariant: a sensor-error sentinel (sgv 0-12) or impossible
+    // value must never reach a Live Activity, widget, or threshold alert — a
+    // 0 would otherwise display as "0 mg/dL" and classify as URGENT LOW. The
+    // current iOS ContentState enum can't decode a sensorError category, so
+    // we skip the push entirely and let the activity's staleDate presentation
+    // cover the outage.
+    if (!isValidSgv(latest.sgv)) {
+      console.warn(`[push/send] invalid reading skipped (sgv=${latest.sgv})`);
+      return NextResponse.json({ skipped: "invalid reading", sgv: latest.sgv });
+    }
+
     // Fetch 3h of history for sparkline
     const since = Date.now() - 3 * 60 * 60 * 1000;
     const historyRes = await fetch(
@@ -98,10 +105,11 @@ export async function GET(req: Request) {
       { cache: "no-store" }
     );
     const historyEntries = historyRes.ok ? await historyRes.json() : [];
-    // Oldest first for sparkline
-    const sparklineValues = historyEntries
-      .map((e: { sgv: number }) => e.sgv)
-      .reverse();
+    // Oldest first for sparkline; drop sensor-error values so they don't
+    // render as dips to zero.
+    const sparklineValues = sanitizeSparkline(
+      historyEntries.map((e: { sgv: number }) => e.sgv)
+    ).reverse();
 
     // Fetch IOB/COB
     let iobDisplay: string | null = null;
@@ -223,7 +231,7 @@ export async function GET(req: Request) {
     }
 
     // ── Silent background push to wake app for widget/Watch refresh ──
-    const alertTokenMap = await loadAlertTokens();
+    // (alertTokenMap loaded up front, before the token-count check)
     const alertTokenList = Object.keys(alertTokenMap);
     let backgroundPushed = 0;
     if (alertTokenList.length > 0) {
