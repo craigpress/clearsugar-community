@@ -118,6 +118,10 @@ function getActiveProfile(profile: PumpProfile) {
   return profile.store[name];
 }
 
+/** Re-exported for hypo-risk.ts, so the two curves cannot disagree about which
+ *  profile segment or ISF they are using. Same function, no behaviour change. */
+export const getActiveProfileFor = getActiveProfile;
+
 /** Look up a time-scheduled value (ISF, CR, basal) for a given timestamp */
 function getScheduledValue(
   schedule: { time: string; value: number; timeAsSeconds: number }[],
@@ -136,6 +140,9 @@ function getScheduledValue(
   }
   return value;
 }
+
+/** Re-exported for hypo-risk.ts — see getActiveProfileFor. */
+export const getScheduledValueAt = getScheduledValue;
 
 // ── IOB Calculation ──
 // Maksimovic exponential insulin model — the standard used by OpenAPS, Loop, and Tidepool.

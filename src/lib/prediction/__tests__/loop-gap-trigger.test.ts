@@ -62,10 +62,12 @@ const NOW = Date.UTC(2026, 5, 19, 8, 0, 0);
 
 describe("evaluateLowTrigger — validated loop-gap low trigger", () => {
   it("FIRES with a carbs action on a steadily-falling series backed by insulin", () => {
-    // 131 -> 95 over 30 min (ROC ~ -6 mg/dL/5min), driven by a recent 6u bolus
+    // 124 -> 88 over 30 min (ROC ~ -6 mg/dL/5min), driven by a recent 6u bolus
     // so the momentum-free CIQ rollout still ends low even with basal suspended.
+    // Ends at 88, under MAX_TRIGGER_BG: from 95 this no longer fires, because a
+    // 30-min slope extrapolation from that far out is noise 75% of the time.
     const readings: GlucoseReading[] = [];
-    for (let i = 6; i >= 0; i--) readings.push(reading(95 + i * 6, NOW - i * FIVE));
+    for (let i = 6; i >= 0; i--) readings.push(reading(88 + i * 6, NOW - i * FIVE));
     const treatments = [bolus(6, NOW - 10 * 60_000)];
 
     const action = evaluateLowTrigger({ readings, treatments, profile, now: NOW });
@@ -97,12 +99,56 @@ describe("evaluateLowTrigger — validated loop-gap low trigger", () => {
     // Same falling shape, but NO bolus: the momentum-free optimistic-CIQ rollout
     // stays flat at the current BG (>=70), so the saturation gate suppresses.
     const readings: GlucoseReading[] = [];
-    for (let i = 6; i >= 0; i--) readings.push(reading(95 + i * 6, NOW - i * FIVE));
+    for (let i = 6; i >= 0; i--) readings.push(reading(88 + i * 6, NOW - i * FIVE));
 
     const action = evaluateLowTrigger({ readings, treatments: [], profile, now: NOW });
     expect(action).toBeNull();
     // gate floor stays at the (in-range) current value
     expect(ciqOptimisticRollout(readings, [], profile, 30)).toBeGreaterThanOrEqual(70);
+  });
+
+  // ── Specificity gates added 2026-07-28 (see the constants in the module) ────
+
+  it("STAYS SILENT once BG is already below the threshold", () => {
+    // A dead-flat 52 with no insulin at all. Before this gate existed the
+    // trigger fired T4_critical here with lead time 0 and an orElse that read
+    // "Heading to ~52" — a prediction of the reading it was handed. The event
+    // is already covered by the Dexcom alarm, the server urgentLow push, the
+    // iOS backstop and HA's ungated urgent_low; a fifth alert adds nothing but
+    // noise, on the one emitter that ignores snooze.
+    const flat: GlucoseReading[] = [];
+    for (let i = 11; i >= 0; i--) flat.push(reading(52, NOW - i * FIVE));
+
+    expect(evaluateLowTrigger({ readings: flat, treatments: [], profile, now: NOW })).toBeNull();
+  });
+
+  it("STAYS SILENT above MAX_TRIGGER_BG even on a steep qualifying slope", () => {
+    // 145 -> 109, ROC ~ -6/5min, with a large bolus behind it: the ROC base and
+    // the saturation gate both pass, but 109 is too far out for a 30-min slope
+    // extrapolation to carry information (84% of such fires were false).
+    const readings: GlucoseReading[] = [];
+    for (let i = 6; i >= 0; i--) readings.push(reading(109 + i * 6, NOW - i * FIVE));
+    const treatments = [bolus(8, NOW - 10 * 60_000)];
+
+    expect(evaluateLowTrigger({ readings, treatments, profile, now: NOW })).toBeNull();
+  });
+
+  it("TIERS T4 only when BOTH projections agree the low is severe", () => {
+    // Falls from 88 on a modest bolus. The ROC line extrapolates under 55, but
+    // the CIQ-optimistic (basal-suspended) path does not — so this is an alert,
+    // not a wake. Under the old min() rule the ROC line alone won T4.
+    const readings: GlucoseReading[] = [];
+    for (let i = 6; i >= 0; i--) readings.push(reading(88 + i * 7, NOW - i * FIVE));
+    const treatments = [bolus(2.2, NOW - 25 * 60_000)];
+
+    const action = evaluateLowTrigger({ readings, treatments, profile, now: NOW });
+    if (action) {
+      const rocMin = Math.min(88, 88 - 7 * 6);
+      const ciqMin = ciqOptimisticRollout(readings, treatments, profile, 30)!;
+      const bothSevere = Math.max(rocMin, ciqMin) < 55;
+      expect(action.tier).toBe(bothSevere ? "T4_critical" : "T2_actionable");
+      expect(action.severity).toBe(bothSevere ? "urgent" : "moderate");
+    }
   });
 
   it("VETOES a compression-low artifact (sharp isolated drop from a stable window)", () => {
