@@ -11,6 +11,8 @@ import type { AdvisoryAction } from "@/lib/prediction/advisor-types";
 import { isPumpSleep, getCiqMode } from "@/lib/prediction/ciq-modes";
 import { pushAlertNotification } from "@/lib/apns";
 import { loadAlertTokens } from "@/app/api/push/register-alert/route";
+import { loadSnoozeState } from "@/app/api/alerts/snooze/route";
+import { advisorSilencedBySnooze } from "@/lib/alert-policy";
 import { loadAlertPrefs, loadIdentities, parentTokens } from "@/app/api/alerts/preferences/route";
 
 export const dynamic = "force-dynamic";
@@ -122,7 +124,12 @@ export async function GET(req: Request) {
     const sleepQuiet = isPumpSleep(now, pumpState?.controlIQ?.sleepSchedule);
     // CIQ mode active now (sleep/exercise/normal) — labels the outcome record.
     const ciqMode = getCiqMode(treatments, now);
+    // Snooze is read once per run and applied per advisory (categories differ
+    // by root cause and severity). Advisories used to ignore snoozes entirely —
+    // see advisorSilencedBySnooze for why that changed and why it is safe.
+    const snooze = shadow ? null : await loadSnoozeState();
     let pushed = 0;
+    let snoozeSuppressed = 0;
     let deliveryFailures = 0;
     const failureReasons: string[] = [];
 
@@ -132,7 +139,17 @@ export async function GET(req: Request) {
       let delivered = 0;
       let attempted = 0;
 
-      if (!shadow && !SILENT_TIERS.has(a.tier)) {
+      // Snooze suppresses the PUSH only: the advisory above is already
+      // recorded, so the outcome harvest still sees it and the cooldown below
+      // still runs.
+      const silenced =
+        snooze !== null && advisorSilencedBySnooze(a.rootCause, a.severity, snooze, now);
+      if (silenced) {
+        snoozeSuppressed += 1;
+        console.log(`advisor: ${a.id} (${a.severity}) suppressed by active snooze`);
+      }
+
+      if (!shadow && !silenced && !SILENT_TIERS.has(a.tier)) {
         // High-side insulin advice → designated recipient(s) only; all else → all.
         const isHighSide = a.actionClass === "high_correction";
         const targets = isHighSide
@@ -194,7 +211,11 @@ export async function GET(req: Request) {
       // record the fire once ≥1 push actually delivered; otherwise leave it uncooled
       // so the next 5-min tick re-fires. All other advisories (and shadow/silent,
       // which never attempt delivery) keep the prior behavior.
-      const mustDeliver = !shadow && a.tier === "T4_critical" && !SILENT_TIERS.has(a.tier);
+      // A snoozed advisory attempted no delivery by design, so it must NOT be
+      // held to the delivery requirement — otherwise a snoozed T4 would never
+      // cool down and would re-record every 5 minutes for the life of the snooze.
+      const mustDeliver =
+        !shadow && !silenced && a.tier === "T4_critical" && !SILENT_TIERS.has(a.tier);
       if (!mustDeliver || delivered > 0) {
         lastFired[a.id] = { at: now, severity: a.severity };
       } else {
@@ -213,6 +234,7 @@ export async function GET(req: Request) {
       mode: shadow ? "shadow" : "live",
       fired: toFire.length,
       pushed,
+      snoozeSuppressed,
       deliveryFailures,
       lastFailureReasons: failureReasons.slice(0, 5),
     });
@@ -229,6 +251,7 @@ export async function GET(req: Request) {
         leadTimeMin: a.leadTimeMin,
       })),
       pushed,
+      snoozeSuppressed,
       deliveryFailures,
       siteFailureVeto: result.siteFailureVeto,
       pumpStaleMin: result.pumpStaleMin,
