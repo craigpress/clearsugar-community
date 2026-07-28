@@ -55,6 +55,13 @@ export function extractFeatures(
   // but the ML feature must mean exactly what it meant at train time.
   const currentISF = observedISF ?? getProfileISF(profile, now);
 
+  // Explicit "expected insulin drop" = active IOB × ISF (mg/dL the current
+  // insulin will remove). Uses the same rounded IOB the vector reports, so it
+  // matches cs_features.py exactly. Gives the model a direct hypo signal instead
+  // of hoping it learns the iob×currentISF interaction from two separate columns.
+  const iobRounded = Math.round(iob * 100) / 100;
+  const expectedDrop = Math.round(iobRounded * currentISF * 10) / 10;
+
   // Recent CV (last 2h)
   const twoHourReadings = sorted.filter((r) => now - r.date < 2 * 3_600_000);
   const recentCV = calcCV(twoHourReadings.map((r) => r.sgv));
@@ -90,9 +97,10 @@ export function extractFeatures(
     roc5,
     roc15,
     roc30,
-    iob: Math.round(iob * 100) / 100,
+    iob: iobRounded,
     cob: Math.round(cob),
     insulinAge: Math.round(insulinAge),
+    expectedDrop,
     minuteOfDay,
     dayOfWeek,
     sinTime,
