@@ -149,9 +149,12 @@ all — every chart above works without it.
 - **Glucose prediction** — a physiological model (insulin activity, carb absorption,
   Control-IQ behavior) that works out of the box, optionally blended with a
   LightGBM/ONNX ML ensemble you can train on your own data.
-- **Smart advisor & alerts** — rule-based detection (urgent lows, sustained highs,
-  site failure, rescue-carb patterns, loop gaps) with configurable thresholds and
-  quiet behavior when nothing is wrong.
+- **Alerts that stay credible** — per-device thresholds with per-category cooldowns,
+  shared snooze, per-device acknowledge, and banner collapsing. The advisor layer
+  (impending lows, sustained highs, site failure, loop gaps) is gated hard against
+  false alarms: tuning it against 284 days of real data cut false overnight wakes
+  **76%** while slightly *increasing* how many lows it warns about in time. See
+  [docs/ALERTS.md](docs/ALERTS.md).
 - **Trends** — 14/30/90-day AGP with percentile bands, day-of-week patterns, daily overlays.
 - **Analysis** — meal-response curves anchored on real carb entries, correction
   effectiveness, basal-rate evaluation, pump-site aging, highs/lows forensics, overnight patterns.
@@ -286,7 +289,9 @@ ClearSugar is **not a medical device** and is not FDA-cleared/CE-marked. It is a
 data-visualization and decision-support tool for personal, non-commercial use.
 
 - **Never** rely on it as your only alerting system. Keep your CGM manufacturer's app
-  and alarms active at all times.
+  and alarms active at all times — ClearSugar's alert tuning explicitly *assumes* they
+  are running, and trades away some sensitivity for far fewer false alarms on that
+  basis ([docs/ALERTS.md](docs/ALERTS.md)).
 - Predictions and AI-generated insights can be wrong. Always verify with your meter/CGM
   and consult your care team before changing any therapy settings.
 
