@@ -8,11 +8,14 @@ import {
 import type { Treatment } from "../../types";
 
 const MIN = 60_000;
-// Host TZ is America/New_York in the existing tests. Pick UTC instants whose
-// LOCAL hour is unambiguous: 02:00 EDT (night) and 12:00 EDT (day).
-const NIGHT_LOCAL = Date.UTC(2026, 6, 1, 6, 0, 0); // 02:00 EDT
-const DAY_LOCAL = Date.UTC(2026, 6, 1, 16, 0, 0); // 12:00 EDT
-const EARLY_AM_LOCAL = Date.UTC(2026, 6, 1, 10, 0, 0); // 06:00 EDT (in old 22–07, NOT in 22–05)
+// isPumpSleep works in LOCAL time (localMinOfDay), so these must be built with
+// the local-time Date constructor, not Date.UTC. The previous version picked
+// UTC instants that land on the intended hour only in America/New_York, so the
+// suite failed anywhere else — including any CI runner, which is UTC.
+const localTime = (h: number) => new Date(2026, 6, 1, h, 0, 0).getTime();
+const NIGHT_LOCAL = localTime(2); // 02:00 local
+const DAY_LOCAL = localTime(12); // 12:00 local
+const EARLY_AM_LOCAL = localTime(6); // 06:00 local (in the old 22–07, NOT in 22–05)
 
 describe("isPumpSleep", () => {
   it("uses the 22:00–05:00 fallback when no schedule is given", () => {

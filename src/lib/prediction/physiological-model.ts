@@ -336,6 +336,12 @@ export function predictPhysiological(
   const now = latest.date;
   const active = getActiveProfile(profile);
 
+  // Ignore low-confidence inferred rescue carbs: those are usually ordinary CGM
+  // wiggle (a small bounce above ~85 mg/dL), and consuming them fabricates a
+  // sharp fake rise in the forecast. Only medium/high-confidence rescues feed
+  // the prediction.
+  const usableRescue = rescueCarbs.filter((r) => r.confidence !== "low");
+
   // Current state
   const roc = estimateRateOfChange(readings);
   const currentIOB = calculateIOB(treatments, profile, now);
@@ -345,6 +351,45 @@ export function predictPhysiological(
   // autosensRatio > 1 means more sensitive (insulin works harder),
   // < 1 means more resistant (insulin works less).
   const autosensRatio = calculateAutosens(readings, treatments, profile);
+
+  // ── Momentum / absorption reconciliation (Loop/oref0-style) ──
+  // The observed ROC already contains the current insulin- and carb-driven
+  // rates. Carrying raw ROC forward AND re-adding the modeled IOB/COB effects
+  // double-counts them — the source of the upside overshoot (e.g. predicting a
+  // +35 rise with insulin on board). Instead we:
+  //   1. Scale modeled carb absorption toward what the CGM actually shows.
+  //      Never above 1 (don't invent absorption); floored at 0.25 so a real
+  //      meal still in its absorption-delay phase isn't zeroed out.
+  //   2. Carry forward only the residual "deviation" ROC the scaled model does
+  //      NOT explain. At step 1 this reproduces the observed trend; over the
+  //      horizon it decays and the physiological model takes over.
+  const isfNow = getScheduledValue(active.sens, now) * autosensRatio;
+  const crNow = getScheduledValue(active.carbratio, now);
+
+  const insulinImpulseNow =
+    -(calculateIOB(treatments, profile, now - FIVE_MIN_MS) -
+      calculateIOB(treatments, profile, now)) * isfNow; // <= 0 (insulin lowers)
+
+  let carbImpulseNow =
+    crNow > 0
+      ? ((calculateCOB(treatments, now - FIVE_MIN_MS) -
+          calculateCOB(treatments, now)) / crNow) * isfNow
+      : 0;
+  if (usableRescue.length > 0 && crNow > 0) {
+    carbImpulseNow +=
+      ((calculateInferredCOB(usableRescue, now - FIVE_MIN_MS) -
+        calculateInferredCOB(usableRescue, now)) / crNow) * isfNow;
+  }
+
+  // What the CGM's actual momentum attributes to carbs (ROC minus known insulin).
+  const observedCarbImpulse = roc - insulinImpulseNow;
+  const absorptionScale =
+    carbImpulseNow > 1
+      ? Math.max(0.25, Math.min(1, observedCarbImpulse / carbImpulseNow))
+      : 1;
+
+  // Residual momentum not explained by the (scaled) physiological model.
+  const deviation = roc - (insulinImpulseNow + carbImpulseNow * absorptionScale);
 
   const steps = horizon / 5;
   const points: PredictionPoint[] = [];
@@ -383,7 +428,7 @@ export function predictPhysiological(
     const rocDecay = isRising
       ? Math.exp(-step * 0.14)  // faster decay when rising
       : Math.exp(-step * 0.045); // original gentle decay when falling
-    const momentumDelta = roc * rocDecay;
+    const momentumDelta = deviation * rocDecay;
 
     // 2. IOB effect — insulin still working lowers glucose
     const iobNow = calculateIOB(treatments, profile, futureTime);
@@ -404,16 +449,17 @@ export function predictPhysiological(
     const cobPrev = calculateCOB(treatments, futureTime - FIVE_MIN_MS);
     const carbsAbsorbed = cobPrev - cobNow; // grams absorbed in this 5-min step
     const cr = getScheduledValue(active.carbratio, futureTime);
-    const cobEffect = cr > 0 ? (carbsAbsorbed / cr) * isf : 0; // positive = glucose rises
+    // Scale by the observed-vs-modeled absorption ratio (see reconciliation above)
+    const cobEffect = cr > 0 ? (carbsAbsorbed / cr) * isf * absorptionScale : 0; // positive = glucose rises
 
     // 4. Inferred rescue carb effect — unlogged fast-sugar corrections
     // Uses a faster absorption curve (30 min vs 4h for food)
     let rescueCobEffect = 0;
-    if (rescueCarbs.length > 0) {
-      const rescueCobNow = calculateInferredCOB(rescueCarbs, futureTime);
-      const rescueCobPrev = calculateInferredCOB(rescueCarbs, futureTime - FIVE_MIN_MS);
+    if (usableRescue.length > 0) {
+      const rescueCobNow = calculateInferredCOB(usableRescue, futureTime);
+      const rescueCobPrev = calculateInferredCOB(usableRescue, futureTime - FIVE_MIN_MS);
       const rescueCarbsAbsorbed = rescueCobPrev - rescueCobNow;
-      rescueCobEffect = cr > 0 ? (rescueCarbsAbsorbed / cr) * isf : 0;
+      rescueCobEffect = cr > 0 ? (rescueCarbsAbsorbed / cr) * isf * absorptionScale : 0;
     }
 
     // Combine effects
