@@ -70,10 +70,11 @@ export interface MLFeatureVector {
   roc15: number; // rate of change, last 15 min
   roc30: number; // rate of change, last 30 min
 
-  // Active insulin/carbs (3)
+  // Active insulin/carbs (4)
   iob: number; // insulin on board (units)
   cob: number; // carbs on board (grams)
   insulinAge: number; // minutes since last bolus
+  expectedDrop: number; // iob × currentISF — mg/dL the active insulin will remove (explicit hypo signal)
 
   // Temporal (4) — cyclical encoding so 23:55 ≈ 00:05
   minuteOfDay: number; // 0-1439
@@ -128,6 +129,10 @@ export const ML_FEATURE_NAMES: (keyof MLFeatureVector)[] = [
   "max1h",
   "sleepActive",
   "exerciseActive",
+  // Appended 2026-07-27 (model 2026-07-27-drop). Explicit insulin-drop signal so
+  // the tree stops relying on iob×currentISF being learned implicitly (it wasn't).
+  // MUST stay last to keep existing column positions; match cs_features.py + feature-engine.ts.
+  "expectedDrop",
 ];
 
 // Rescue-carb features are computed by feature-engine for other uses but are
