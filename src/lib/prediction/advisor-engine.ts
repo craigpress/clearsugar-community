@@ -26,12 +26,13 @@ const INSULIN_ACTION_TYPES = new Set<AdvisoryAction["actionType"]>(["correct_by_
  */
 const PUMP_STALE_MIN = 25;
 
-/** Most-recent treatment age in minutes (the tconnectsync sync proxy). */
+/** Most-recent pump-origin treatment age in minutes (the tconnectsync sync proxy). */
 function pumpStalenessMin(treatments: Treatment[], now: number): number | null {
   let latest = -Infinity;
   for (const t of treatments) {
+    if (!/tconnectsync/i.test(t.enteredBy ?? "")) continue;
     const ms = t.mills || (t.created_at ? new Date(t.created_at).getTime() : 0);
-    if (ms > latest) latest = ms;
+    if (Number.isFinite(ms) && ms <= now && ms > latest) latest = ms;
   }
   if (!isFinite(latest) || latest <= 0) return null;
   return (now - latest) / 60_000;
@@ -55,7 +56,7 @@ export interface AdvisorResult {
 export function evaluateAdvisories(input: AdvisorInput): AdvisorResult {
   const { treatments, now } = input;
   const pumpStaleMin = pumpStalenessMin(treatments, now);
-  const stale = pumpStaleMin !== null && pumpStaleMin > PUMP_STALE_MIN;
+  const stale = pumpStaleMin === null || pumpStaleMin > PUMP_STALE_MIN;
 
   const site = evaluateSiteFailure(input); // HSR #1 veto source + site advisory
   const low = evaluateLowTrigger(input); // CGM-driven, not insulin
@@ -73,7 +74,7 @@ export function evaluateAdvisories(input: AdvisorInput): AdvisorResult {
     // HSR #2 — a high-side pen correction is insulin advice: on stale pump data
     // we can't trust IOB, so it's suppressed and surfaced only as a stale notice.
     const masked = site.advisory ?? high;
-    if (masked) out.push(staleNotice(pumpStaleMin!, now, masked));
+    if (masked) out.push(staleNotice(pumpStaleMin, now, masked));
     return {
       actions: dedupSort(out),
       siteFailureVeto: site.veto,
@@ -121,8 +122,8 @@ function severityRank(s: AdvisoryAction["severity"]): number {
  * advisor would have warned but can't trust the data. This is the "missed alert"
  * case; routine staleness with nothing pending produces no notice at all.
  */
-function staleNotice(pumpStaleMin: number, now: number, masked: AdvisoryAction): AdvisoryAction {
-  const stale = Math.round(pumpStaleMin);
+function staleNotice(pumpStaleMin: number | null, now: number, masked: AdvisoryAction): AdvisoryAction {
+  const stale = pumpStaleMin === null ? null : Math.round(pumpStaleMin);
   return {
     id: "stale_data",
     actionType: "fingerstick_verify",
@@ -141,14 +142,14 @@ function staleNotice(pumpStaleMin: number, now: number, masked: AdvisoryAction):
     leadTimeMin: 0,
     orElse:
       `A possible ${masked.rootCause.replace(/_/g, " ")} was developing, but pump data is ` +
-      `${stale} min stale. Check BG and the site manually.`,
+      `${stale === null ? "unavailable" : stale + " min stale"}. Check BG and the site manually.`,
     magnitudeGrams: null,
     headline: "Check BG — pump data stale",
     confidence: 1,
     staleness: { pumpStaleMin: stale, cgmStaleMin: null },
     evidence: [
       `masked advisory: ${masked.id} — ${masked.headline}`,
-      `last pump treatment ${stale} min ago (> ${PUMP_STALE_MIN} min)`,
+      stale === null ? "no trustworthy pump timestamp" : `last pump treatment ${stale} min ago (> ${PUMP_STALE_MIN} min)`,
     ],
     generatedAt: now,
   };

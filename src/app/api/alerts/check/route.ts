@@ -3,7 +3,7 @@ import { safeEqual } from "@/lib/api-auth";
 import { loadJSON, saveJSON } from "@/lib/local-store";
 import { getEntries, getTreatments } from "@/lib/nightscout";
 import { detectSiteAndSensorIssues } from "@/lib/insights/site-sensor-detection";
-import { DEFAULT_SETTINGS, type AlertSettings } from "@/app/api/alerts/settings/route";
+import { DEFAULT_SETTINGS, type AlertSettings } from "@/lib/server/alert-settings";
 
 export const dynamic = "force-dynamic";
 

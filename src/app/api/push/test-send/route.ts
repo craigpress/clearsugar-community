@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { pushAlertNotification } from "@/lib/apns";
-import { loadAlertTokens } from "@/app/api/push/register-alert/route";
+import { loadAlertTokens } from "@/lib/server/alert-registration";
 import { requireApiAuth } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";

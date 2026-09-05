@@ -262,26 +262,61 @@ def calc_iob_for_autosens(treatments, dia_minutes: float, at_ms: int) -> float:
 # ──────────────────────────────────────────────────────────────────────────
 # COB — Hermite smoothstep over 180min, 240min safety window
 # ──────────────────────────────────────────────────────────────────────────
-def carb_absorption_percent(minutes_age: float) -> float:
-    """Fraction of carbs absorbed at age `minutes_age`.
-    Faithful port of carbAbsorptionPercent() in physiological-model.ts."""
+def carb_safety_window_min(span_minutes: float = COB_ABSORPTION_MIN) -> float:
+    """Safety window for a span: never below the historical 4h floor."""
+    return max(float(COB_SAFETY_WINDOW_MIN), float(span_minutes) + 60.0)
+
+
+def treatment_carb_span(t) -> float:
+    """Nightscout `absorptionTime` when it is a positive finite number, else 180."""
+    a = t.get("absorptionTime")
+    try:
+        a = float(a)
+    except (TypeError, ValueError):
+        return float(COB_ABSORPTION_MIN)
+    if not math.isfinite(a) or a <= 0:
+        return float(COB_ABSORPTION_MIN)
+    return a
+
+
+def carb_absorption_percent(minutes_age: float,
+                            span_minutes: float = COB_ABSORPTION_MIN) -> float:
+    """Fraction of carbs absorbed at age `minutes_age` over `span_minutes`.
+    Faithful port of carbAbsorptionPercent() in physiological-model.ts. The span
+    only rescales time; the Hermite curve shape is unchanged."""
     if minutes_age <= 0:
         return 0.0
-    if minutes_age >= COB_SAFETY_WINDOW_MIN:
+    if minutes_age >= carb_safety_window_min(span_minutes):
         return 1.0
-    shifted = min(1.0, minutes_age / COB_ABSORPTION_MIN)
+    shifted = min(1.0, minutes_age / span_minutes)
     return shifted * shifted * (3 - 2 * shifted)
+
+
+def dedupe_carb_treatments(treatments):
+    """Only repeated copies of the same Nightscout document are duplicates."""
+    seen = set()
+    kept = []
+    for t in treatments:
+        identity = t.get("_id")
+        if t.get("carbs", 0) and t["carbs"] > 0 and isinstance(identity, str) and identity:
+            if identity in seen:
+                continue
+            seen.add(identity)
+        kept.append(t)
+    return treatments if len(kept) == len(treatments) else kept
 
 
 def calc_cob(treatments, at_ms: int) -> float:
     """Carbs on board at at_ms. Faithful port of calculateCOB()."""
     cob = 0.0
-    for t in treatments:
+    for t in dedupe_carb_treatments(treatments):
         carbs = t.get("carbs")
         if carbs and carbs > 0:
+            span = treatment_carb_span(t)
+            window = carb_safety_window_min(span)
             age = (at_ms - treatment_time(t)) / 60_000
-            if 0 <= age < COB_SAFETY_WINDOW_MIN:
-                absorbed = carbs * carb_absorption_percent(age)
+            if 0 <= age < window:
+                absorbed = carbs * carb_absorption_percent(age, span)
                 cob += carbs - absorbed
     return max(0.0, cob)
 

@@ -39,6 +39,7 @@ from cs_features import (
     fetch_treatments,
     find_site_changes,
     precompute_treatment_arrays,
+    precompute_carb_spans,
     precompute_mode_intervals,
 )
 
@@ -253,6 +254,7 @@ def build_eval_dataset(entries, treatments, profile):
     agp_medians = compute_agp_medians(entries)
     site_changes = find_site_changes(treatments)
     (bt, bu, ct, cg, tbs) = precompute_treatment_arrays(treatments, profile)
+    carb_spans_arr = precompute_carb_spans(treatments)
     sleep_iv, exercise_iv = precompute_mode_intervals(treatments)
     dia_min = profile["dia"] * 60
     dates = entries["date"].values
@@ -263,6 +265,7 @@ def build_eval_dataset(entries, treatments, profile):
         feats = extract_features_at(
             entries, profile, agp_medians, site_changes, idx,
             bt, bu, ct, cg, dia_min, tbs, sleep_iv, exercise_iv,
+            carb_spans_arr=carb_spans_arr,
         )
         if feats is None:
             continue

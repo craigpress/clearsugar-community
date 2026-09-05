@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { loadJSON } from "@/lib/local-store";
 import { requireApiAuth } from "@/lib/api-auth";
-import { loadAlertPrefs } from "@/app/api/alerts/preferences/route";
+import { loadAlertPrefs } from "@/lib/server/alert-preferences";
 
 export const dynamic = "force-dynamic";
 

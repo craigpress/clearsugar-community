@@ -10,8 +10,8 @@ import { TIER_INTERRUPTION, SILENT_TIERS } from "@/lib/prediction/advisor-types"
 import type { AdvisoryAction } from "@/lib/prediction/advisor-types";
 import { isPumpSleep, getCiqMode } from "@/lib/prediction/ciq-modes";
 import { pushAlertNotification } from "@/lib/apns";
-import { loadAlertTokens } from "@/app/api/push/register-alert/route";
-import { loadAlertPrefs, loadIdentities, parentTokens } from "@/app/api/alerts/preferences/route";
+import { loadAlertTokens } from "@/lib/server/alert-registration";
+import { loadAlertPrefs, loadIdentities, parentTokens } from "@/lib/server/alert-preferences";
 
 export const dynamic = "force-dynamic";
 
