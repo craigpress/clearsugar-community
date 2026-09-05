@@ -77,6 +77,15 @@ struct GlucoseLiveActivity: Widget {
                     .foregroundStyle(.secondary)
             }
 
+            // Sparkline with X/Y axes (3h history + prediction; data already in
+            // the payload; same component the Dynamic Island expanded view uses)
+            SparklineView(
+                historyValues: state.sparklineValues,
+                predictionValues: state.predictionValues,
+                showAxes: true
+            )
+            .frame(height: 46)
+
             // Urgency text if needed
             if state.rangeCategory.isUrgent {
                 Text(urgencyText(state.rangeCategory))
@@ -130,12 +139,13 @@ struct GlucoseLiveActivity: Widget {
                 }
             }
 
-            // Sparkline in expanded Dynamic Island
+            // Sparkline in expanded Dynamic Island — with X/Y axes (watch-style)
             SparklineView(
                 historyValues: state.sparklineValues,
-                predictionValues: state.predictionValues
+                predictionValues: state.predictionValues,
+                showAxes: true
             )
-            .frame(height: 30)
+            .frame(height: 56)
         }
     }
 
@@ -269,6 +279,10 @@ private struct WidthAwareMinimal: View {
 struct SparklineView: View {
     let historyValues: [Int]
     let predictionValues: [Int]?
+    /// When true, reserve a left gutter for Y-axis labels (70/180) and a bottom
+    /// gutter for X-axis time labels, with dashed threshold lines — matching the
+    /// watch complication. Defaults off (bare sparkline for the lock-screen banner).
+    var showAxes: Bool = false
 
     // Brand colors
     private let inRangeColor = Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
@@ -285,47 +299,101 @@ struct SparklineView: View {
         GeometryReader { geo in
             let allValues = combinedValues
             if allValues.count >= 2 {
-                let minVal = max(40, (allValues.min() ?? 70) - 10)
-                let maxVal = min(400, (allValues.max() ?? 180) + 10)
+                let dataMin = (allValues.min() ?? 70) - 10
+                let dataMax = (allValues.max() ?? 180) + 10
+                // With axes on, the domain must always contain the 70/180
+                // markers (plus a little padding so the labels never sit on the
+                // edge). Otherwise a sustained high or low pushes the guide
+                // lines, their labels and the green in-range band outside the
+                // plot area — SwiftUI does not clip, so they land on top of the
+                // rest of the card. A hypo card painted green is the worst case.
+                let minVal = showAxes ? max(40, min(dataMin, Int(rangeLow) - 6)) : max(40, dataMin)
+                let maxVal = showAxes ? min(400, max(dataMax, Int(rangeHigh) + 6)) : min(400, dataMax)
                 let valueRange = Double(maxVal - minVal)
-                let w = geo.size.width
-                let h = geo.size.height
+                // Reserve axis gutters only when labels are shown.
+                let axisW: CGFloat = showAxes ? 22 : 0
+                let axisH: CGFloat = showAxes ? 11 : 0
+                let w = geo.size.width - axisW
+                let h = geo.size.height - axisH
 
-                ZStack {
-                    // Green zone band (70-180)
-                    let bandTop = yPosition(for: rangeHigh, minVal: Double(minVal), range: valueRange, height: h)
-                    let bandBottom = yPosition(for: rangeLow, minVal: Double(minVal), range: valueRange, height: h)
-                    Rectangle()
-                        .fill(inRangeColor.opacity(0.25))
-                        .frame(height: max(0, bandBottom - bandTop))
-                        .offset(y: bandTop + (bandBottom - bandTop) / 2 - h / 2)
+                ZStack(alignment: .topLeading) {
+                    // ── Chart area (band + history + prediction), inset by the gutters ──
+                    ZStack {
+                        // Green zone band (70-180)
+                        let bandTop = yPosition(for: rangeHigh, minVal: Double(minVal), range: valueRange, height: h)
+                        let bandBottom = yPosition(for: rangeLow, minVal: Double(minVal), range: valueRange, height: h)
+                        Rectangle()
+                            .fill(inRangeColor.opacity(0.25))
+                            .frame(height: max(0, bandBottom - bandTop))
+                            .offset(y: bandTop + (bandBottom - bandTop) / 2 - h / 2)
 
-                    // History line (colored by range)
-                    historyPath(
-                        values: historyValues,
-                        totalPoints: allValues.count,
-                        minVal: Double(minVal),
-                        range: valueRange,
-                        width: w,
-                        height: h
-                    )
-
-                    // Prediction dashed line
-                    if let predVals = predictionValues, !predVals.isEmpty {
-                        predictionPath(
-                            historyCount: historyValues.count,
-                            predValues: predVals,
+                        // History line (colored by range)
+                        historyPath(
+                            values: historyValues,
                             totalPoints: allValues.count,
                             minVal: Double(minVal),
                             range: valueRange,
                             width: w,
                             height: h
                         )
+
+                        // Prediction dashed line
+                        if let predVals = predictionValues, !predVals.isEmpty {
+                            predictionPath(
+                                historyCount: historyValues.count,
+                                predValues: predVals,
+                                totalPoints: allValues.count,
+                                minVal: Double(minVal),
+                                range: valueRange,
+                                width: w,
+                                height: h
+                            )
+                        }
+                    }
+                    .frame(width: w, height: h)
+                    // Belt-and-braces: the band is sized from the value domain,
+                    // so anything unexpected stays inside the plot rather than
+                    // bleeding over the surrounding card.
+                    .clipped()
+                    .offset(x: axisW)
+
+                    // ── Axes: dynamic Y labels (70/180) + X time labels, watch-style ──
+                    if showAxes {
+                        axisMarkers(minVal: Double(minVal), range: valueRange, axisW: axisW, chartW: w, chartH: h)
                     }
                 }
             }
             // When < 2 values, render nothing (empty GeometryReader)
         }
+    }
+
+    /// Y-axis threshold labels (70/180) with dashed guide lines across the chart,
+    /// plus X-axis time labels at the edges. Ported from the watch complication.
+    @ViewBuilder
+    private func axisMarkers(minVal: Double, range: Double, axisW: CGFloat, chartW: CGFloat, chartH: CGFloat) -> some View {
+        ForEach([70.0, 180.0], id: \.self) { marker in
+            let y = yPosition(for: marker, minVal: minVal, range: range, height: chartH)
+            Path { p in
+                p.move(to: CGPoint(x: axisW, y: y))
+                p.addLine(to: CGPoint(x: axisW + chartW, y: y))
+            }
+            .stroke(Color.secondary.opacity(0.35), style: StrokeStyle(lineWidth: 0.5, dash: [2, 2]))
+            Text("\(Int(marker))")
+                .font(.system(size: 8, design: .rounded))
+                .foregroundStyle(.secondary)
+                .position(x: axisW / 2, y: y)
+        }
+        // X-axis: oldest history on the left, end of prediction on the right.
+        Text("-3h")
+            .font(.system(size: 8, design: .rounded))
+            .foregroundStyle(.secondary)
+            .position(x: axisW + 10, y: chartH + 5)
+        // Only claim a forecast horizon when there is actually a prediction —
+        // matches WidgetSparkline.
+        Text((predictionValues?.isEmpty == false) ? "+30m" : "now")
+            .font(.system(size: 8, design: .rounded))
+            .foregroundStyle(.secondary)
+            .position(x: axisW + chartW - 14, y: chartH + 5)
     }
 
     private var combinedValues: [Int] {

@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Type check
+        run: npx tsc --noEmit
+      # No TZ pin: the suite is timezone-independent and must stay that way, so
+      # contributors get the same result wherever they are. If a test ever needs
+      # a specific local hour, build it with the local-time Date constructor
+      # (see ciq-modes.test.ts) rather than pinning a zone here.
+      - name: Unit tests
+        run: npx vitest run

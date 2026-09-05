@@ -60,6 +60,15 @@ export async function pushAlertNotification(
   body: string,
   category?: string,
   interruptionLevel: AlertInterruptionLevel = "active",
+  opts?: {
+    /** apns-collapse-id: a repeat of the same alert REPLACES the previous
+     *  banner instead of stacking a new one. Without it a sustained high
+     *  leaves a pile of identical banners on the lock screen. */
+    collapseId?: string;
+    /** Custom payload key so the iOS ACK handler knows which alert type it is
+     *  acknowledging (needed for the per-device, per-type server ack). */
+    alertType?: string;
+  },
 ): Promise<{ success: boolean; status: number }> {
   if (!APNS_BUNDLE_ID) {
     console.error("[apns] APNS_BUNDLE_ID not set — skipping alert push");
@@ -75,6 +84,7 @@ export async function pushAlertNotification(
       "interruption-level": interruptionLevel,
       ...(category && { category }),
     },
+    ...(opts?.alertType && { alertType: opts.alertType }),
   });
 
   return new Promise((resolve, reject) => {
@@ -100,6 +110,7 @@ export async function pushAlertNotification(
       "apns-topic": APNS_BUNDLE_ID,
       "apns-push-type": "alert",
       "apns-priority": apnsPriority,
+      ...(opts?.collapseId && { "apns-collapse-id": opts.collapseId }),
       "content-type": "application/json",
       "content-length": Buffer.byteLength(payload),
     });

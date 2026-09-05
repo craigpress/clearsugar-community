@@ -1,7 +1,7 @@
 # Community ClearSugar handoff — 2026-09-04
 
-Ported shared fixes from private product review: pump-source freshness and unknown-age suppression; identity-only carb dedup and per-treatment absorption spans; Python training/evaluation spans; atomic storage (including binary operations); supported Next route exports; owner-only device assignment using local roles.
+Shared meal-integrity fixes integrated with origin/main e8a966e (the original local checkout was stale). Latest alert overhaul, ack/token identity, hypo-floor gates and momentum model are preserved. Helpers moved out of all five route modules. Owner-only assignment uses local user roles. COB uses explicit document identity and per-treatment absorption spans. Python training/evaluation pass spans; expectedDrop restored in Python to match the existing 23-feature TypeScript schema.
 
-Validated on Windows: 116 tests, tsc, production build. Private counterpart: 676 tests, Python COB parity, 52 iOS tests. Family meal UI/AuthentiK endpoints were not copied.
+Integrated validation: 169 tests, tsc and production build pass. Private counterpart: 676 tests, Python COB parity, 52 iOS tests. Family meal UI/AuthentiK endpoints were not copied.
 
-Actual code differs from private more than old sync notes claimed: no private ack route, older momentum reconciliation and 22-feature schema (no expectedDrop). This patch preserves that schema and limits physiology changes to COB. Prior documentation, package-lock and .20f formatting edits remain uncommitted; do not overwrite them.
+Integration checkout: C:\Users\craig\AppData\Local\Temp\cs-community-integration-20260904. The canonical checkout's prior documentation, package-lock and .20f formatting edits must be preserved when advancing it to this merge. No community deployment configured or performed.

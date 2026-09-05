@@ -36,6 +36,7 @@ FEATURE_NAMES = [
     # tconnectsync v3.0.0). Appended AFTER the original 20 so existing feature
     # positions are unchanged. MUST match types.ts ML_FEATURE_NAMES + feature-engine.ts.
     "sleepActive", "exerciseActive",
+    "expectedDrop",
 ]
 
 INSULIN_DELAY_MIN = 10  # 10-minute delay before insulin starts acting (matches Loop)
@@ -496,6 +497,7 @@ def extract_features_at(
         "max1h": int(one_h.max()) if len(one_h) > 0 else sgv,
         "sleepActive": _in_any_interval(sleep_intervals, now),
         "exerciseActive": _in_any_interval(exercise_intervals, now),
+        "expectedDrop": round(round(iob, 2) * current_isf, 1),
         "timestamp": now,
     }
 
