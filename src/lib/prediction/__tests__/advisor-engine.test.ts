@@ -53,6 +53,7 @@ function flatReadings(sgv = 120): GlucoseReading[] {
 function tempBasal(ageMin: number): Treatment {
   const ms = NOW - ageMin * MIN;
   return {
+    enteredBy: "tconnectsync",
     eventType: "Temp Basal",
     created_at: new Date(ms).toISOString(),
     mills: ms,
@@ -102,4 +103,24 @@ describe("evaluateAdvisories", () => {
     expect(res.pumpStaleMin).toBeNull();
     expect(res.staleSuppressed).toBe(false);
   });
+});
+
+describe("pump provenance", () => {
+  it("does not refresh pump age with manual carbs", () => {
+    const input = { readings: flatReadings(), treatments: [tempBasal(60), { ...tempBasal(0), enteredBy: "ClearSugar", eventType: "Carb Correction", carbs: 15 }], profile: PROFILE, now: NOW };
+    expect(evaluateAdvisories(input).pumpStaleMin).toBe(60);
+  });
+  it("treats missing and future pump timestamps as unknown", () => {
+    for (const treatments of [[], [tempBasal(-10)]]) {
+      expect(evaluateAdvisories({ readings: flatReadings(), treatments, profile: PROFILE, now: NOW }).pumpStaleMin).toBeNull();
+    }
+  });
+});
+
+it("suppresses a real high correction when pump freshness is unknown", () => {
+  const result = evaluateAdvisories({ readings: flatReadings(340), treatments: [], profile: PROFILE, now: NOW });
+  expect(result.pumpStaleMin).toBeNull();
+  expect(result.staleSuppressed).toBe(true);
+  expect(result.actions.some(action => action.actionType === "correct_by_pen")).toBe(false);
+  expect(result.actions.some(action => action.rootCause === "stale_data")).toBe(true);
 });

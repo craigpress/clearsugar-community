@@ -7,10 +7,10 @@ import {
   calculateIOB,
   calculateCOB,
 } from "@/lib/prediction/physiological-model";
-import { loadAlertTokens } from "@/app/api/push/register-alert/route";
+import { loadAlertTokens } from "@/lib/server/alert-registration";
 import { loadLiveActivityTokens, saveLiveActivityTokens } from "@/app/api/push/register/route";
-import { loadSnoozeState, saveSnoozeState } from "@/app/api/alerts/snooze/route";
-import { loadAlertPrefs, getDevicePrefs } from "@/app/api/alerts/preferences/route";
+import { loadSnoozeState, saveSnoozeState } from "@/lib/server/alert-snooze";
+import { loadAlertPrefs, getDevicePrefs } from "@/lib/server/alert-preferences";
 
 export const dynamic = "force-dynamic";
 

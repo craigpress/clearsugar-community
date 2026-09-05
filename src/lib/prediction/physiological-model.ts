@@ -232,15 +232,54 @@ export function calculateIOB(
 
 // ── COB Calculation ──
 // Hermite S-curve absorption over a 180-min window (must match the Python
-// calculate_cob in scripts/train-model.py).
+// calculate_cob in scripts/train-model.py, scripts/cs_features.py and
+// carb_absorption_percent/calc_cob in scripts/cs_physio.py).
 
-function carbAbsorptionPercent(minutesAge: number): number {
+/** Default Hermite absorption span in minutes. */
+export const CARB_ABSORPTION_SPAN_MIN = 180;
+
+/** Safety window for a given absorption span: never below the historical 4h. */
+export function carbSafetyWindowMin(
+  spanMinutes: number = CARB_ABSORPTION_SPAN_MIN
+): number {
+  return Math.max(240, spanMinutes + 60);
+}
+
+/**
+ * Resolve a treatment's absorption span: Nightscout's `absorptionTime` when it
+ * is a positive finite number, else the 180-min default.
+ */
+export function treatmentCarbSpan(t: Treatment): number {
+  const a = t.absorptionTime;
+  return typeof a === "number" && Number.isFinite(a) && a > 0
+    ? a
+    : CARB_ABSORPTION_SPAN_MIN;
+}
+
+/** Only repeated copies of the same Nightscout document are duplicates.
+ * Similar amounts and nearby timestamps cannot identify an eating event. */
+export function dedupeCarbTreatments(treatments: Treatment[]): Treatment[] {
+  const seen = new Set<string>();
+  const kept = treatments.filter(t => {
+    if (!(t.carbs && t.carbs > 0) || !t._id) return true;
+    if (seen.has(t._id)) return false;
+    seen.add(t._id);
+    return true;
+  });
+  return kept.length === treatments.length ? treatments : kept;
+}
+
+export function carbAbsorptionPercent(
+  minutesAge: number,
+  spanMinutes: number = CARB_ABSORPTION_SPAN_MIN
+): number {
   if (minutesAge <= 0) return 0;
-  if (minutesAge >= 240) return 1; // fully absorbed by the 4h safety window
-  // Hermite smoothstep (3s² - 2s³) over the first 180 min, then fully absorbed.
-  // Fraction absorbed: ~7% at 30 min, ~26% at 60 min, ~74% at 120 min,
-  // 100% by 180 min. (Not a 50%-at-60-min curve — it is back-loaded.)
-  const shifted = Math.min(1, minutesAge / 180); // 0..1 over the 180-min absorption span
+  if (minutesAge >= carbSafetyWindowMin(spanMinutes)) return 1; // fully absorbed by the safety window
+  // Hermite smoothstep (3s² - 2s³) over the first `spanMinutes`, then fully absorbed.
+  // At the 180-min default, fraction absorbed: ~7% at 30 min, ~26% at 60 min,
+  // ~74% at 120 min, 100% by 180 min. (Not a 50%-at-60-min curve — it is
+  // back-loaded.) The span only rescales time; the curve shape is unchanged.
+  const shifted = Math.min(1, minutesAge / spanMinutes); // 0..1 over the absorption span
   return shifted * shifted * (3 - 2 * shifted);
 }
 
@@ -251,12 +290,14 @@ export function calculateCOB(
 ): number {
   let cob = 0;
 
-  for (const t of treatments) {
+  for (const t of dedupeCarbTreatments(treatments)) {
     if (t.carbs && t.carbs > 0) {
+      const span = treatmentCarbSpan(t);
+      const window = carbSafetyWindowMin(span);
       const age = (atTime - treatmentTime(t)) / 60_000; // minutes
-      if (age >= 0 && age < 240) {
-        // 4h window for safety
-        const absorbed = t.carbs * carbAbsorptionPercent(age);
+      if (age >= 0 && age < window) {
+        // ≥ 4h window for safety
+        const absorbed = t.carbs * carbAbsorptionPercent(age, span);
         cob += t.carbs - absorbed;
       }
     }

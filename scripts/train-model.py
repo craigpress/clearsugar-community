@@ -37,6 +37,7 @@ from cs_features import (
     fetch_treatments,
     find_site_changes,
     precompute_treatment_arrays,
+    precompute_carb_spans,
     precompute_mode_intervals,
 )
 
@@ -88,6 +89,7 @@ def build_dataset(
         carb_grams_arr,
         temp_basal_segments,
     ) = precompute_treatment_arrays(treatments, profile)
+    carb_spans_arr = precompute_carb_spans(treatments)
     sleep_iv, exercise_iv = precompute_mode_intervals(treatments)
 
     dia_min = profile["dia"] * 60
@@ -105,6 +107,7 @@ def build_dataset(
             entries, profile, agp_medians, site_changes, idx,
             bolus_times_arr, bolus_units_arr, carb_times_arr, carb_grams_arr,
             dia_min, temp_basal_segments, sleep_iv, exercise_iv,
+            carb_spans_arr=carb_spans_arr,
         )
         if features is None:
             continue

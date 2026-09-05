@@ -57,7 +57,7 @@ export async function getAuthIdentity(req: Request): Promise<AuthIdentity | null
 
   const session = await auth();
   const who = session?.user?.name ?? session?.user?.email;
-  if (who) return { sub: who, name: session?.user?.name ?? undefined };
+  if (who) return { sub: who, name: session?.user?.name ?? undefined, role: session?.user?.role };
   return null;
 }
 

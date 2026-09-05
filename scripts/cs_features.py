@@ -40,6 +40,10 @@ FEATURE_NAMES = [
 
 INSULIN_DELAY_MIN = 10  # 10-minute delay before insulin starts acting (matches Loop)
 
+# ── COB (match physiological-model.ts + cs_physio.py) ──
+COB_ABSORPTION_MIN = 180        # default Hermite smoothstep span
+COB_SAFETY_WINDOW_MIN = 240     # floor for the safety window: max(240, span + 60)
+
 
 # ── Nightscout Data Fetching ──
 
@@ -219,18 +223,45 @@ def iob_curve(minutes_age: float, dia_minutes: float) -> float:
     return max(0.0, min(1.0, iob))
 
 
-def calculate_cob(carb_times: np.ndarray, carb_grams: np.ndarray, at_time: int) -> float:
-    """Carbs on board (vectorized). Hermite S-curve over 180 min, then absorbed.
+def carb_spans_from(treatments: pd.DataFrame, n: int) -> np.ndarray:
+    """Per-row carb absorption span (minutes) for a treatments slice.
 
-    Matches carbAbsorptionPercent in physiological-model.ts: ~7% absorbed at
-    30 min, ~26% at 60 min, ~74% at 120 min, 100% by 180 min. 4h safety window.
+    Uses Nightscout's `absorptionTime` when the column exists and the value is a
+    positive finite number; otherwise falls back to COB_ABSORPTION_MIN (180).
+    """
+    spans = np.full(n, float(COB_ABSORPTION_MIN), dtype=np.float64)
+    if treatments is None or "absorptionTime" not in getattr(treatments, "columns", []):
+        return spans
+    raw = pd.to_numeric(treatments["absorptionTime"], errors="coerce").values.astype(np.float64)
+    if len(raw) != n:
+        return spans
+    ok = np.isfinite(raw) & (raw > 0)
+    spans[ok] = raw[ok]
+    return spans
+
+
+def calculate_cob(
+    carb_times: np.ndarray,
+    carb_grams: np.ndarray,
+    at_time: int,
+    carb_spans: np.ndarray | None = None,
+) -> float:
+    """Carbs on board (vectorized). Hermite S-curve over `carb_spans` min, then absorbed.
+
+    Matches carbAbsorptionPercent in physiological-model.ts: at the 180-min
+    default, ~7% absorbed at 30 min, ~26% at 60 min, ~74% at 120 min, 100% by
+    180 min. Safety window is max(240, span + 60) so a longer span is not
+    truncated. `carb_spans` is a per-row span array; None means all-180.
     """
     ages = (at_time - carb_times) / 60_000  # minutes
-    mask = (ages >= 0) & (ages < 240)
+    spans = (np.full(len(carb_times), float(COB_ABSORPTION_MIN), dtype=np.float64)
+             if carb_spans is None else np.asarray(carb_spans, dtype=np.float64))
+    windows = np.maximum(float(COB_SAFETY_WINDOW_MIN), spans + 60.0)
+    mask = (ages >= 0) & (ages < windows)
     if not mask.any():
         return 0.0
     a = ages[mask]
-    shifted = np.clip(a / 180.0, 0.0, 1.0)
+    shifted = np.clip(a / spans[mask], 0.0, 1.0)
     absorbed_frac = shifted * shifted * (3.0 - 2.0 * shifted)
     remaining = carb_grams[mask] * (1.0 - absorbed_frac)
     return float(np.sum(remaining))
@@ -352,8 +383,16 @@ def extract_features_at(
     temp_basal_segments: np.ndarray | None = None,
     sleep_intervals: np.ndarray | None = None,
     exercise_intervals: np.ndarray | None = None,
+    carb_spans_arr: np.ndarray | None = None,
 ) -> dict | None:
-    """Extract the feature vector at a given reading index (+ timestamp)."""
+    """Extract the feature vector at a given reading index (+ timestamp).
+
+    NOTE: `carb_spans_arr` MUST stay last. train-model.py and evaluate-model.py
+    call this positionally as (..., dia_min, temp_basal_segments, sleep_iv,
+    exercise_iv); Phase 0 originally inserted carb_spans_arr ahead of those two,
+    which silently bound sleep_iv to carb_spans_arr and crashed calculate_cob
+    with "too many indices" on the first retrain. Append new params, never
+    insert."""
     row = entries.iloc[idx]
     now = row["date"]
     sgv = row["sgv"]
@@ -387,7 +426,7 @@ def extract_features_at(
     roc30 = roc_window(30)
 
     iob = calculate_iob(bolus_times_arr, bolus_units_arr, dia_min, now, temp_basal_segments)
-    cob = calculate_cob(carb_times_arr, carb_grams_arr, now)
+    cob = calculate_cob(carb_times_arr, carb_grams_arr, now, carb_spans_arr)
 
     prior_mask = bolus_times_arr <= now
     insulin_age = (now - bolus_times_arr[prior_mask].max()) / 60_000 if prior_mask.any() else 360.0
@@ -485,6 +524,23 @@ def _in_any_interval(intervals: np.ndarray | None, t: float) -> float:
     return 1.0 if bool(((t >= intervals[:, 0]) & (t <= intervals[:, 1])).any()) else 0.0
 
 
+def _carb_rows(treatments: pd.DataFrame) -> pd.DataFrame:
+    """Carb-bearing rows, deduplicated by Nightscout document ID before flattening.
+
+    Shared by precompute_treatment_arrays() and precompute_carb_spans() so the
+    flat mills/carbs arrays and the per-row span array stay index-aligned.
+    """
+    carbs_df = treatments[treatments["carbs"].fillna(0) > 0]
+    if len(carbs_df) < 2:
+        return carbs_df
+    if "_id" not in carbs_df.columns:
+        return carbs_df
+    ids = carbs_df["_id"]
+    valid = ids.map(lambda value: isinstance(value, str) and bool(value))
+    return carbs_df.loc[~(valid & ids.duplicated())]
+
+
+
 def precompute_treatment_arrays(treatments: pd.DataFrame, profile: dict):
     """Return (bolus_times, bolus_units, carb_times, carb_grams, temp_basal_segments)."""
     if treatments.empty:
@@ -495,9 +551,22 @@ def precompute_treatment_arrays(treatments: pd.DataFrame, profile: dict):
     bolus_times_arr = boluses_df["mills"].values.astype(np.float64)
     bolus_units_arr = boluses_df["insulin"].values.astype(np.float64)
 
-    carbs_df = treatments[treatments["carbs"].fillna(0) > 0]
+    carbs_df = _carb_rows(treatments)
     carb_times_arr = carbs_df["mills"].values.astype(np.float64)
     carb_grams_arr = carbs_df["carbs"].values.astype(np.float64)
 
     temp_basal_segments = build_temp_basal_segments(treatments, profile)
     return bolus_times_arr, bolus_units_arr, carb_times_arr, carb_grams_arr, temp_basal_segments
+
+
+def precompute_carb_spans(treatments: pd.DataFrame) -> np.ndarray:
+    """Per-carb-row absorption span (minutes), aligned with `carb_times`/`carb_grams`.
+
+    Optional: pass the result to extract_features_at(..., carb_spans_arr=...)
+    -- by KEYWORD only; see the note on that function's signature.
+    Omitting it keeps the historical all-180 behaviour bit-for-bit.
+    """
+    if treatments.empty:
+        return np.empty(0, dtype=np.float64)
+    carbs_df = _carb_rows(treatments)
+    return carb_spans_from(carbs_df, len(carbs_df))

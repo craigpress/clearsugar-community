@@ -37,6 +37,7 @@ export interface Treatment {
   insulin?: number | null;
   // Carb fields
   carbs?: number | null;
+  absorptionTime?: number | null;
   // Temp basal fields
   rate?: number;
   absolute?: number;
