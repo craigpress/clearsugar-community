@@ -337,7 +337,8 @@ private struct GlucoseSmallView: View {
                     historyValues: entry.sparklineValues,
                     predictionValues: entry.predictionValues.isEmpty ? nil : entry.predictionValues,
                     showYAxis: true,
-                    compact: true
+                    compact: true,
+                    showXAxis: true
                 )
                 .frame(maxWidth: .infinity)
                 .frame(height: 50)
@@ -448,7 +449,8 @@ private struct GlucoseMediumView: View {
                     historyValues: entry.sparklineValues,
                     predictionValues: entry.predictionValues.isEmpty ? nil : entry.predictionValues,
                     showYAxis: true,
-                    compact: false
+                    compact: false,
+                    showXAxis: true
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -475,7 +477,8 @@ private struct GlucoseExtraLargePortraitView: View {
                     historyValues: entry.sparklineValues,
                     predictionValues: entry.predictionValues.isEmpty ? nil : entry.predictionValues,
                     showYAxis: true,
-                    compact: false
+                    compact: false,
+                    showXAxis: true
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -650,6 +653,9 @@ private struct WidgetSparkline: View {
     let predictionValues: [Int]?
     let showYAxis: Bool
     let compact: Bool
+    /// Show an X-axis time row (-3h … now/+30m) under the chart. Off by default
+    /// so the tiny accessory widgets keep their bare mini-sparkline.
+    var showXAxis: Bool = false
 
     // Brand colors
     private let inRangeColor = Color(red: 0x66 / 255, green: 0xBB / 255, blue: 0x6A / 255)
@@ -665,6 +671,7 @@ private struct WidgetSparkline: View {
     private let rangeHigh: Double = 180
 
     var body: some View {
+        VStack(spacing: 1) {
         HStack(spacing: 2) {
             // Y-axis labels
             if showYAxis {
@@ -765,6 +772,19 @@ private struct WidgetSparkline: View {
                     }
                 }
             }
+        }
+        if showXAxis {
+            HStack {
+                Text("-3h")
+                    .font(.system(size: compact ? 6 : 7, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text((predictionValues?.isEmpty == false) ? "+30m" : "now")
+                    .font(.system(size: compact ? 6 : 7, design: .rounded))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.leading, showYAxis ? (compact ? 18 : 22) : 0)
+        }
         }
     }
 

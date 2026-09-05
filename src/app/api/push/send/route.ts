@@ -11,43 +11,44 @@ import { loadAlertTokens } from "@/lib/server/alert-registration";
 import { loadLiveActivityTokens, saveLiveActivityTokens } from "@/app/api/push/register/route";
 import { loadSnoozeState, saveSnoozeState } from "@/lib/server/alert-snooze";
 import { loadAlertPrefs, getDevicePrefs } from "@/lib/server/alert-preferences";
+import { classifyGlucose, ALERT_CONFIG } from "@/lib/alert-classify";
+import {
+  migrateAlertState,
+  categoryCooldownPassed,
+  recordCategoryFired,
+  updateInRangeTracking,
+  sustainedInRange,
+  isDeviceAcked,
+  pruneExpiredAcks,
+  type GlucoseAlertStateV2,
+} from "@/lib/alert-policy";
+import { removeAlertToken } from "@/lib/alert-token-store";
+import { loadDeviceAcks, saveDeviceAcks } from "@/lib/server/alert-acks";
+import { isValidSgv, sanitizeSparkline } from "@/lib/glucose-validity";
 
 export const dynamic = "force-dynamic";
 
 // ── Glucose alert cooldowns & categories ──
-
-const ALERT_CONFIG: Record<string, { cooldownMs: number; category: string }> = {
-  urgentLow:  { cooldownMs: 5 * 60 * 1000,  category: "URGENT_GLUCOSE" },
-  low:        { cooldownMs: 15 * 60 * 1000, category: "GLUCOSE_WARNING" },
-  high:       { cooldownMs: 30 * 60 * 1000, category: "GLUCOSE_WARNING" },
-  urgentHigh: { cooldownMs: 15 * 60 * 1000, category: "URGENT_GLUCOSE" },
-};
-
-/** Classify glucose against a device's thresholds */
-function classifyGlucose(sgv: number, prefs: { thresholdUrgentLow: number; thresholdLow: number; thresholdHigh: number; thresholdUrgentHigh: number }): string | null {
-  if (sgv < prefs.thresholdUrgentLow) return "urgentLow";
-  if (sgv < prefs.thresholdLow) return "low";
-  if (sgv >= prefs.thresholdUrgentHigh) return "urgentHigh";
-  if (sgv >= prefs.thresholdHigh) return "high";
-  return null;
-}
+// ALERT_CONFIG lives in lib/alert-classify.ts so /api/alerts/ack shares the
+// same per-type cooldowns.
 
 const GLUCOSE_ALERT_STATE_KEY = "push/glucose-alert-state.json";
 
-interface GlucoseAlertState {
-  lastAlertType: string;
-  lastAlertTime: number;
-  lastSgv: number;
+/**
+ * How long readings must stay in range before cooldowns and untilRange snoozes
+ * clear. Clearing on ANY single in-range reading means glucose hovering at a
+ * threshold re-alerts on every crossing.
+ */
+const SUSTAINED_IN_RANGE_MS =
+  Number(process.env.ALERT_SUSTAINED_IN_RANGE_MS) || 15 * 60_000;
+
+async function loadGlucoseAlertState(): Promise<GlucoseAlertStateV2> {
+  const raw = await loadJSON<unknown>(GLUCOSE_ALERT_STATE_KEY, {});
+  return migrateAlertState(raw);
 }
 
-async function loadGlucoseAlertState(): Promise<GlucoseAlertState | null> {
-  const state = await loadJSON<GlucoseAlertState | Record<string, never>>(GLUCOSE_ALERT_STATE_KEY, {});
-  if (!state || !("lastAlertType" in state)) return null;
-  return state as GlucoseAlertState;
-}
-
-async function saveGlucoseAlertState(state: GlucoseAlertState | null): Promise<void> {
-  await saveJSON(GLUCOSE_ALERT_STATE_KEY, state ?? {});
+async function saveGlucoseAlertState(state: GlucoseAlertStateV2): Promise<void> {
+  await saveJSON(GLUCOSE_ALERT_STATE_KEY, state);
 }
 
 /**
@@ -66,11 +67,14 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Get Live Activity push tokens from stored registrations
+  // Load BOTH registration stores up front. A device may register for
+  // threshold alerts without ever starting a Live Activity — alert delivery
+  // must not depend on Live Activity registrations existing.
   const storedTokenMap = await loadLiveActivityTokens();
   const tokens = Object.keys(storedTokenMap);
+  const alertTokenMap = await loadAlertTokens();
 
-  if (tokens.length === 0) {
+  if (tokens.length === 0 && Object.keys(alertTokenMap).length === 0) {
     return NextResponse.json({
       sent: 0,
       reason: "No push tokens. Open the app to register.",
@@ -91,6 +95,17 @@ export async function GET(req: Request) {
     const latest = entries[0];
     if (!latest) throw new Error("No glucose entries");
 
+    // Valid-data invariant: a sensor-error sentinel (sgv 0-12) or impossible
+    // value must never reach a Live Activity, widget, or threshold alert — a
+    // 0 would otherwise display as "0 mg/dL" and classify as URGENT LOW. The
+    // current iOS ContentState enum can't decode a sensorError category, so
+    // we skip the push entirely and let the activity's staleDate presentation
+    // cover the outage.
+    if (!isValidSgv(latest.sgv)) {
+      console.warn(`[push/send] invalid reading skipped (sgv=${latest.sgv})`);
+      return NextResponse.json({ skipped: "invalid reading", sgv: latest.sgv });
+    }
+
     // Fetch 3h of history for sparkline
     const since = Date.now() - 3 * 60 * 60 * 1000;
     const historyRes = await fetch(
@@ -98,10 +113,11 @@ export async function GET(req: Request) {
       { cache: "no-store" }
     );
     const historyEntries = historyRes.ok ? await historyRes.json() : [];
-    // Oldest first for sparkline
-    const sparklineValues = historyEntries
-      .map((e: { sgv: number }) => e.sgv)
-      .reverse();
+    // Oldest first for sparkline; drop sensor-error values so they don't
+    // render as dips to zero.
+    const sparklineValues = sanitizeSparkline(
+      historyEntries.map((e: { sgv: number }) => e.sgv)
+    ).reverse();
 
     // Fetch IOB/COB
     let iobDisplay: string | null = null;
@@ -223,7 +239,7 @@ export async function GET(req: Request) {
     }
 
     // ── Silent background push to wake app for widget/Watch refresh ──
-    const alertTokenMap = await loadAlertTokens();
+    // (alertTokenMap loaded up front, before the token-count check)
     const alertTokenList = Object.keys(alertTokenMap);
     let backgroundPushed = 0;
     if (alertTokenList.length > 0) {
@@ -239,11 +255,13 @@ export async function GET(req: Request) {
     const alertTypes: string[] = [];
 
     const now = Date.now();
-    const [alertState, snoozeState, allPrefs] = await Promise.all([
+    const [alertState, snoozeState, allPrefs, deviceAcks] = await Promise.all([
       loadGlucoseAlertState(),
       loadSnoozeState(),
       loadAlertPrefs(),
+      loadDeviceAcks(),
     ]);
+    let acksDirty = pruneExpiredAcks(deviceAcks, now);
 
     // Check snooze status (shared across devices)
     const isSnoozed = (() => {
@@ -255,14 +273,19 @@ export async function GET(req: Request) {
     })();
 
     // Check each device independently against its own thresholds
-    // alertTokenMap is now token → deviceName
     const deviceEntries = Object.entries(alertTokenMap); // token → deviceName
     let anyDeviceOutOfRange = false;
-    let strongestAlertType: string | null = null;
+    const deadAlertTokens: string[] = [];
 
-    if (!isSnoozed && deviceEntries.length > 0) {
-      const pushPromises: Promise<{ success: boolean; status: number }>[] = [];
+    {
+      const pushes: { token: string; alertType: string; promise: Promise<{ success: boolean; status: number }> }[] = [];
+      const firedTypes = new Set<string>();
 
+      // Classification runs EVERY cycle, snoozed or not. Skipping the loop
+      // while snoozed leaves anyDeviceOutOfRange false, so the "back in range"
+      // branch below wipes an untilRange snooze within one cycle of it being
+      // set — while glucose is still out of range. That is the bug that makes
+      // snoozes appear not to work at all.
       for (const [token] of deviceEntries) {
         const prefs = getDevicePrefs(allPrefs, token);
         const alertType = classifyGlucose(sgv, prefs);
@@ -270,20 +293,26 @@ export async function GET(req: Request) {
         if (!alertType) continue;
         anyDeviceOutOfRange = true;
         if (!alertTypes.includes(alertType)) alertTypes.push(alertType);
+        if (isSnoozed) continue; // classified for range tracking; no push while snoozed
 
         const config = ALERT_CONFIG[alertType];
         if (!config) continue;
 
-        // Check per-alert-type dedup cooldown
-        const cooldownPassed = !alertState ||
-          alertState.lastAlertType !== alertType ||
-          (now - alertState.lastAlertTime) > config.cooldownMs;
+        // Per-CATEGORY cooldown. A single {lastAlertType} record means devices
+        // classifying the same reading differently (one phone's urgentHigh is
+        // another's high) overwrite each other's clock every cycle, and alerts
+        // then fire on every timer tick all night.
+        if (!categoryCooldownPassed(alertState, alertType, now, config.cooldownMs)) continue;
 
-        // Also check if this specific category is snoozed
+        // Category-specific snooze
         const catSnoozed = snoozeState.snoozedCategories.length > 0 &&
           (snoozeState.snoozedCategories.includes("all") || snoozeState.snoozedCategories.includes(alertType));
+        if (catSnoozed) continue;
 
-        if (!cooldownPassed || catSnoozed) continue;
+        // Per-device ack: this phone acknowledged this alert type — skip it,
+        // keep alerting the others. Escalation to a different (more urgent)
+        // category is a different key and still fires here.
+        if (isDeviceAcked(deviceAcks, token, alertType, now)) continue;
 
         const isUrgent = alertType === "urgentLow" || alertType === "urgentHigh";
         const title = isUrgent
@@ -291,32 +320,72 @@ export async function GET(req: Request) {
           : (alertType === "low" ? "Glucose Low" : "Glucose High");
         const body = `${sgv} mg/dL ${trendArrow} (${deltaStr})`;
 
-        strongestAlertType = alertType;
-        pushPromises.push(pushAlertNotification(token, title, body, config.category));
+        pushes.push({
+          token,
+          alertType,
+          promise: pushAlertNotification(token, title, body, config.category, "active", {
+            // A repeat of the same alert type replaces the previous banner
+            // instead of stacking another identical one.
+            collapseId: `glucose-${alertType}`,
+            alertType,
+          }),
+        });
       }
 
-      if (pushPromises.length > 0) {
-        const results = await Promise.allSettled(pushPromises);
-        glucoseAlertPushed = results.filter((r) => r.status === "fulfilled").length;
+      if (pushes.length > 0) {
+        const results = await Promise.allSettled(pushes.map((p) => p.promise));
+        results.forEach((r, i) => {
+          if (r.status === "fulfilled") {
+            glucoseAlertPushed++;
+            firedTypes.add(pushes[i].alertType);
+          } else {
+            // APNs told us this token is dead → prune it from the alert stores.
+            // Logging and ignoring these lets dead tokens accumulate forever.
+            const msg = r.reason instanceof Error ? r.reason.message : "";
+            if (msg.includes("BadDeviceToken") || msg.includes("Unregistered") || msg.includes("ExpiredToken")) {
+              deadAlertTokens.push(pushes[i].token);
+            }
+          }
+        });
 
-        if (glucoseAlertPushed > 0 && strongestAlertType) {
-          await saveGlucoseAlertState({ lastAlertType: strongestAlertType, lastAlertTime: now, lastSgv: sgv });
-        }
+        for (const t of firedTypes) recordCategoryFired(alertState, t, now, sgv);
       }
     }
 
-    // If no device is out of range, clear dedup + "until range" snooze
-    if (!anyDeviceOutOfRange && deviceEntries.length > 0) {
-      const saves: Promise<void>[] = [];
-      if (alertState?.lastAlertType) {
-        saves.push(saveGlucoseAlertState(null));
-      }
+    // Sustained in-range → clear cooldowns, untilRange snooze, and acks.
+    // A single in-range reading only STARTS the clock.
+    updateInRangeTracking(alertState, !anyDeviceOutOfRange && deviceEntries.length > 0, now);
+    if (sustainedInRange(alertState, now, SUSTAINED_IN_RANGE_MS)) {
+      alertState.categories = {};
+      alertState.inRangeSince = 0; // restart tracking; nothing left to clear
       if (snoozeState.untilRange) {
-        saves.push(
-          saveSnoozeState({ snoozedUntil: 0, snoozedCategories: [], snoozedBy: "", untilRange: false })
-        );
+        await saveSnoozeState({ snoozedUntil: 0, snoozedCategories: [], snoozedBy: "", untilRange: false });
       }
-      if (saves.length > 0) await Promise.all(saves);
+      if (Object.keys(deviceAcks).length > 0) {
+        for (const k of Object.keys(deviceAcks)) delete deviceAcks[k];
+        acksDirty = true;
+      }
+    }
+    await saveGlucoseAlertState(alertState);
+    if (acksDirty) await saveDeviceAcks(deviceAcks);
+
+    // Prune tokens APNs rejected (registration map + high-alert recipients).
+    if (deadAlertTokens.length > 0) {
+      const [prunePrefs, pruneRecipients] = await Promise.all([
+        loadJSON<Record<string, unknown>>("push/alert-preferences.json", {}),
+        loadJSON<string[]>("push/high-alert-recipients.json", []),
+      ]);
+      const stores = { tokens: alertTokenMap, prefs: prunePrefs, recipients: pruneRecipients };
+      let pruned = 0;
+      for (const t of deadAlertTokens) if (removeAlertToken(stores, t)) pruned++;
+      if (pruned > 0) {
+        await Promise.all([
+          saveJSON("push/alert-tokens.json", stores.tokens),
+          saveJSON("push/alert-preferences.json", stores.prefs),
+          saveJSON("push/high-alert-recipients.json", stores.recipients),
+        ]);
+        console.log(`[push/send] pruned ${pruned} dead alert token(s)`);
+      }
     }
 
     return NextResponse.json({
