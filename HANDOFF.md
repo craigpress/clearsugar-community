@@ -4,4 +4,4 @@ Shared meal-integrity fixes integrated with origin/main e8a966e (the original lo
 
 Integrated validation: 169 tests, tsc and production build pass. Private counterpart: 676 tests, Python COB parity, 52 iOS tests. Family meal UI/AuthentiK endpoints were not copied.
 
-Integration checkout: C:\Users\craig\AppData\Local\Temp\cs-community-integration-20260904. The canonical checkout's prior documentation, package-lock and .20f formatting edits must be preserved when advancing it to this merge. No community deployment configured or performed.
+Integration checkout: C:\Users\craig\AppData\Local\Temp\cs-community-integration-20260904. Canonical checkout advanced to ee8afcf; all ten prior documentation, package-lock and .20f formatting edits were restored and remain unstaged. No community deployment configured or performed.
