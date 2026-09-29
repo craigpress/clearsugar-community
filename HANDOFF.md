@@ -2,7 +2,8 @@
 
 ## State
 
-Generalized shared server/iOS reliability updates and family meal/photo workflows.
+Published generalized shared server/iOS reliability updates and family meal/photo workflows
+as `e71aae3`; GitHub CI `36589794731` passed after the approved force-with-lease rewrite.
 Owners manage named profiles and explicit local-account assignments. Only the primary
 profile mirrors confirmed uncovered carbohydrates to Nightscout; other profiles have
 isolated local journals. Photos are metadata-stripped and authorized by profile. Optional
@@ -18,9 +19,10 @@ The approved history rewrite removes historical screenshots, handoffs, README an
 documentation (including old personal clinical summaries) while
 preserving code history, then restores the current synthetic images and this handoff.
 Retained historical text was scanned for private identities, paths and addresses; Gitleaks
-found no credentials. Local recovery bundles preserve the previous history. Publication
-and CI must be checked after the rewrite; cached commits or existing clones cannot be
-revoked by a force-push.
+found no credentials. Local recovery bundles preserve the previous history. Remote main
+was verified; no remote tags, other branches, open PRs or forks were present. Cached
+commits or existing clones cannot be revoked by a force-push. Existing clones should
+re-clone or carefully reset to the rewritten main, never merge the old history back.
 
 ## Next
 
