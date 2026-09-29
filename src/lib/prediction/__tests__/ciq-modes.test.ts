@@ -18,14 +18,14 @@ const DAY_LOCAL = localTime(12); // 12:00 local
 const EARLY_AM_LOCAL = localTime(6); // 06:00 local (in the old 22–07, NOT in 22–05)
 
 describe("isPumpSleep", () => {
-  it("uses the 22:00–05:00 fallback when no schedule is given", () => {
+  it("uses generic overnight quiet hours when no schedule is given", () => {
     expect(isPumpSleep(NIGHT_LOCAL)).toBe(true); // 02:00
     expect(isPumpSleep(DAY_LOCAL)).toBe(false); // 12:00
   });
 
-  it("treats 06:00 as awake under the pump 22:00–05:00 window (the schedule change)", () => {
-    // Under the old hardcoded 22:00–07:00 this would have been 'night'.
-    expect(isPumpSleep(EARLY_AM_LOCAL)).toBe(false);
+  it("uses the published pump schedule instead of generic quiet hours", () => {
+    expect(isPumpSleep(EARLY_AM_LOCAL)).toBe(true);
+    expect(isPumpSleep(EARLY_AM_LOCAL, { startMin: 22 * 60, endMin: 5 * 60, enabled: true })).toBe(false);
   });
 
   it("honors a published schedule and its enabled flag", () => {

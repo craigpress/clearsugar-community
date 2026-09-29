@@ -3,6 +3,7 @@ import SafariServices
 import WidgetKit
 
 struct ContentView: View {
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 96
     @Environment(\.scenePhase) private var scenePhase
     @State private var reading: GlucoseReading?
     @State private var error: String?
@@ -53,8 +54,10 @@ struct ContentView: View {
                     reauthBanner
                 }
 
-                if let reading {
+                if let reading, reading.isValid {
                     glucoseDisplay(reading)
+                } else if reading != nil {
+                    errorDisplay("No valid glucose reading")
                 } else if let error {
                     errorDisplay(error)
                 } else {
@@ -191,7 +194,7 @@ struct ContentView: View {
                     // Glucose number + trend arrow
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text("\(reading.sgv)")
-                            .font(.system(size: 96, weight: .bold, design: .rounded))
+                            .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(glucoseColor(reading.rangeCategory))
                             .accessibilityLabel("\(reading.sgv) milligrams per deciliter")
@@ -517,10 +520,10 @@ struct ContentView: View {
                 WidgetCenter.shared.reloadAllTimelines()
             }
 
-            // Evaluate alerts (handles haptics internally) + re-arm dead-man watchdog
+            // Evaluate local glucose alarms (handles haptics internally).
             await MainActor.run {
                 AlertManager.shared.evaluate(newReading)
-                AlertManager.shared.rearmDataWatchdog(latest: newReading)
+                AlertManager.shared.recordGlucoseUpdate(latest: newReading)
             }
 
             // Update Live Activity (Dynamic Island + Lock Screen)

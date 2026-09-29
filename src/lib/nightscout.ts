@@ -1,6 +1,7 @@
 // ClearSugar — Nightscout API client
 // Reads from the Nightscout REST API (NIGHTSCOUT_URL)
 
+import { createHash } from "node:crypto";
 import type {
   GlucoseReading,
   Treatment,
@@ -16,15 +17,19 @@ if (!NIGHTSCOUT_URL && !isDemoMode()) {
   console.warn("NIGHTSCOUT_URL not set — Nightscout API calls will fail");
 }
 const API_SECRET = process.env.NIGHTSCOUT_API_SECRET || "";
+const NIGHTSCOUT_TOKEN = process.env.NIGHTSCOUT_TOKEN || "";
 
-function headers(): HeadersInit {
-  const h: HeadersInit = {
+function apiSecretHash(): string | null {
+  return API_SECRET ? createHash("sha1").update(API_SECRET).digest("hex") : null;
+}
+
+function headers(): Record<string, string> {
+  const h: Record<string, string> = {
     Accept: "application/json",
     "User-Agent": "ClearSugar/1.0",
   };
-  if (API_SECRET) {
-    h["API-SECRET"] = API_SECRET;
-  }
+  const hash = apiSecretHash();
+  if (hash) h["api-secret"] = hash;
   return h;
 }
 
@@ -123,7 +128,7 @@ export async function getStatus(): Promise<NightscoutStatus> {
 
 /**
  * Fetch the latest pump-state doc published to Nightscout devicestatus by the
- * CT-110 clearsugar-pumpstate job (pump IOB + real Control-IQ settings). Returns
+ * pump-state publisher (pump IOB + real Control-IQ settings). Returns
  * null when the job hasn't published yet or the doc is malformed — every caller
  * MUST degrade to profile-derived defaults, never assume this is present.
  */
@@ -167,3 +172,76 @@ export async function getLastPumpUpdate(): Promise<Date | null> {
 
 // getBoluses() and getCarbs() removed — dead code with insufficient limits.
 // Treatment fetching is handled by /api/treatments route which queries by type.
+
+export const CLEARSUGAR_ENTERED_BY = "ClearSugar";
+
+export type NewTreatment = Omit<
+  Treatment,
+  "_id" | "mills" | "utcOffset" | "enteredBy" | "created_at"
+> & { created_at?: string };
+
+function applyWriteAuth(url: URL, h: Record<string, string>): void {
+  if (NIGHTSCOUT_TOKEN) {
+    url.searchParams.set("token", NIGHTSCOUT_TOKEN);
+    return;
+  }
+  const hash = apiSecretHash();
+  if (hash) {
+    h["api-secret"] = hash;
+    return;
+  }
+  throw new Error("Nightscout write credential not configured");
+}
+
+function invalidateTreatmentsCache(): void {
+  for (const key of fetchCache.keys()) {
+    if (key.includes("/api/v1/treatments")) fetchCache.delete(key);
+  }
+}
+
+export async function postTreatment(input: NewTreatment): Promise<Treatment> {
+  if (isDemoMode()) throw new Error("Nightscout writes are unavailable in demo mode");
+  if (!NIGHTSCOUT_URL) throw new Error("NIGHTSCOUT_URL not configured");
+  const doc = {
+    ...input,
+    enteredBy: CLEARSUGAR_ENTERED_BY,
+    created_at: input.created_at ?? new Date().toISOString(),
+  };
+  const url = new URL("/api/v1/treatments.json", NIGHTSCOUT_URL);
+  const h: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    "User-Agent": "ClearSugar/1.0",
+  };
+  applyWriteAuth(url, h);
+  const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: h,
+    body: JSON.stringify([doc]),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`Nightscout POST treatments: ${res.status} ${res.statusText}`);
+  const body = (await res.json()) as Treatment[] | Treatment;
+  const created = Array.isArray(body) ? body[0] : body;
+  if (!created || typeof created._id !== "string") {
+    throw new Error("Nightscout POST treatments: no document returned");
+  }
+  invalidateTreatmentsCache();
+  return created;
+}
+
+export async function deleteTreatment(id: string): Promise<void> {
+  if (isDemoMode()) throw new Error("Nightscout writes are unavailable in demo mode");
+  if (!NIGHTSCOUT_URL) throw new Error("NIGHTSCOUT_URL not configured");
+  if (!/^[a-f0-9]{24}$/i.test(id)) {
+    throw new Error(`Nightscout DELETE treatment: invalid id ${JSON.stringify(id)}`);
+  }
+  const url = new URL(`/api/v1/treatments/${id}`, NIGHTSCOUT_URL);
+  const h: Record<string, string> = { Accept: "application/json", "User-Agent": "ClearSugar/1.0" };
+  applyWriteAuth(url, h);
+  const res = await fetch(url.toString(), { method: "DELETE", headers: h, cache: "no-store" });
+  if (!res.ok && res.status !== 404) {
+    throw new Error(`Nightscout DELETE treatment: ${res.status} ${res.statusText}`);
+  }
+  invalidateTreatmentsCache();
+}

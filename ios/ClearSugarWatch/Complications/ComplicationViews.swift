@@ -23,7 +23,7 @@ struct ComplicationViews: View {
 
     private var circularView: some View {
         VStack(spacing: 0) {
-            Text("\(entry.sgv)")
+            Text(glucoseText)
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .minimumScaleFactor(0.7)
                 .lineLimit(1)
@@ -33,7 +33,7 @@ struct ComplicationViews: View {
         .foregroundStyle(complicationColor)
         .widgetAccentable()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.sgv) \(entry.trendArrow)")
+        .accessibilityLabel(accessibilitySummary)
     }
 
     // MARK: - Rectangular: glucose + delta + arrow + sparkline + time
@@ -41,14 +41,16 @@ struct ComplicationViews: View {
     private var rectangularView: some View {
         VStack(alignment: .leading, spacing: 1) {
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(entry.sgv)")
+                Text(glucoseText)
                     .font(.system(size: 22, weight: .bold, design: .rounded))
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
-                Text(entry.deltaString)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
-                Text(entry.trendArrow)
-                    .font(.system(size: 12))
+                if entry.hasData {
+                    Text(entry.deltaString)
+                        .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    Text(entry.trendArrow)
+                        .font(.system(size: 12))
+                }
                 Spacer()
                 Text(timeAgoString)
                     .font(.system(size: 10))
@@ -64,20 +66,34 @@ struct ComplicationViews: View {
         }
         .widgetAccentable()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(entry.sgv) \(entry.deltaString) \(entry.trendArrow), \(timeAgoString)")
+        .accessibilityLabel(accessibilitySummary)
     }
 
     // MARK: - Inline: "145 →"
 
     private var inlineView: some View {
-        Text("\(entry.sgv) \(entry.trendArrow)")
-            .accessibilityLabel("\(entry.sgv) \(entry.trendArrow)")
+        Text(entry.hasData ? "\(entry.sgv) \(entry.trendArrow)" : "ClearSugar --")
+            .accessibilityLabel(accessibilitySummary)
+    }
+
+    // MARK: - No-data presentation
+
+    private var glucoseText: String {
+        entry.hasData ? "\(entry.sgv)" : "--"
+    }
+
+    private var accessibilitySummary: String {
+        guard entry.hasData else { return "Glucose unavailable" }
+        return "\(entry.sgv) \(entry.deltaString) \(entry.trendArrow), \(timeAgoString)"
     }
 
     // MARK: - Brand Colors
 
     private var complicationColor: Color {
-        glucoseColor(entry.rangeCategory)
+        // Without a reading there is no range to colour-code; a grey dash reads as
+        // "no data" instead of borrowing the in-range green.
+        guard entry.hasData else { return .secondary }
+        return glucoseColor(entry.rangeCategory)
     }
 
     private func glucoseColor(_ category: RangeCategory) -> Color {
@@ -91,6 +107,7 @@ struct ComplicationViews: View {
     }
 
     private var stalenessColor: Color {
+        guard entry.hasData else { return .secondary }
         let mins = entry.minutesAgo
         if mins > 15 {
             return Color(red: 0.94, green: 0.33, blue: 0.31)
@@ -102,6 +119,9 @@ struct ComplicationViews: View {
     }
 
     private var timeAgoString: String {
+        // .noData carries a .distantPast readingDate, which would otherwise format
+        // as a nonsense age in the millions of minutes.
+        guard entry.hasData else { return "no data" }
         let mins = entry.minutesAgo
         return mins <= 1 ? "now" : "\(mins)m ago"
     }

@@ -37,7 +37,7 @@ final class GlucoseStore: ObservableObject {
         guard defaults.object(forKey: "cached_sgv") != nil else { return }
 
         let sgv = defaults.integer(forKey: "cached_sgv")
-        guard sgv > 0 else { return }
+        guard sgv > 12 && sgv < 600 else { return }
 
         cachedReading = GlucoseReading(fromWatchPayload: [
             "sgv": sgv,

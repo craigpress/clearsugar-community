@@ -1,42 +1,40 @@
 import { NextResponse } from "next/server";
-import { loadJSON, saveJSON } from "@/lib/local-store";
 import { requireApiAuth } from "@/lib/api-auth";
+import { loadInstalls, saveInstalls, upsertToken } from "@/lib/live-activity-store";
 
 export const dynamic = "force-dynamic";
 
-const LIVE_ACTIVITY_TOKENS_KEY = "push/live-activity-tokens.json";
-
-// Maps APNs push token → device name (for display only)
-type LiveActivityTokenMap = Record<string, string>;
-
-export async function loadLiveActivityTokens(): Promise<LiveActivityTokenMap> {
-  return loadJSON<LiveActivityTokenMap>(LIVE_ACTIVITY_TOKENS_KEY, {});
-}
-
-export async function saveLiveActivityTokens(tokens: LiveActivityTokenMap): Promise<void> {
-  await saveJSON(LIVE_ACTIVITY_TOKENS_KEY, tokens);
-}
-
+/**
+ * POST /api/push/register
+ *
+ * Registers a Live Activity token onto an install record. Accepts a stable
+ * `installId` (build 8+) so the server can pair a device's push-to-start token
+ * and per-activity update token; a build-7 payload with only `pushToken` still
+ * works (the store synthesizes an install key from the token).
+ *
+ * Body: { installId?, device?, pushToken? , pushToStartToken? }
+ */
 export async function POST(req: Request) {
   const denied = await requireApiAuth(req);
   if (denied) return denied;
-
   try {
     const body = await req.json();
-    const token = (body.pushToken || body.token || "").trim();
+    const installId: string | undefined = (body.installId || "").trim() || undefined;
     const device = (body.device || "unknown").trim();
+    const updateToken = (body.pushToken || body.token || "").trim();
+    const startToken = (body.pushToStartToken || "").trim();
 
-    if (!token) {
-      return NextResponse.json({ error: "token required" }, { status: 400 });
+    if (!updateToken && !startToken) {
+      return NextResponse.json({ error: "pushToken or pushToStartToken required" }, { status: 400 });
     }
 
-    const tokens = await loadLiveActivityTokens();
-    tokens[token] = device;
-    await saveLiveActivityTokens(tokens);
+    const store = await loadInstalls();
+    let id = installId ?? "";
+    if (updateToken) id = upsertToken(store, { installId, device, kind: "update", token: updateToken });
+    if (startToken) id = upsertToken(store, { installId, device, kind: "start", token: startToken });
+    await saveInstalls(store);
 
-    console.log(`Registered LA token for '${device}': ${token.substring(0, 16)}... (${Object.keys(tokens).length} devices)`);
-
-    return NextResponse.json({ registered: true, device, count: Object.keys(tokens).length });
+    return NextResponse.json({ registered: true, device, installId: id, count: Object.keys(store).length });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json({ error: message }, { status: 400 });
@@ -46,10 +44,17 @@ export async function POST(req: Request) {
 export async function GET(req: Request) {
   const denied = await requireApiAuth(req);
   if (denied) return denied;
-
-  const tokens = await loadLiveActivityTokens();
+  const store = await loadInstalls();
   const safe = Object.fromEntries(
-    Object.entries(tokens).map(([token, device]) => [token.substring(0, 8) + "...", device])
+    Object.entries(store).map(([id, rec]) => {
+      // Legacy/synthesized installs are keyed on the full APNs token — mask it.
+      const maskedId = id.startsWith("tok:") ? `tok:${id.slice(4, 12)}…` : id;
+      return [maskedId, {
+        device: rec.device,
+        hasUpdate: !!rec.updateToken,
+        hasStart: !!rec.startToken,
+      }];
+    })
   );
-  return NextResponse.json({ devices: safe, count: Object.keys(tokens).length });
+  return NextResponse.json({ installs: safe, count: Object.keys(store).length });
 }

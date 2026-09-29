@@ -1,3 +1,13 @@
+---
+title: "Security Policy"
+type: reference
+status: active
+tags:
+  - project/clearsugar-community
+  - domain/ai
+  - type/reference
+---
+
 # Security Policy
 
 ## Reporting a vulnerability

@@ -3,8 +3,7 @@
 // The whole low-side advisor rests on ClearSugar's *computed* IOB (the
 // Maksimovic curve in physiological-model.ts, whose temp-basal term uses a
 // single average-age approximation). The Tandem BFF now exposes the pump's OWN
-// IOB at each bolus/BG event (published to NS devicestatus by the CT-110
-// clearsugar-pumpstate job). This module shadow-compares the two at the pump's
+// IOB at each bolus/BG event (published to NS devicestatus by a pump-state publisher). This module shadow-compares the two at the pump's
 // timestamp to surface systematic drift. It changes NO threshold and feeds NO
 // advisory — pure observability. If the bias is small the model is trustworthy;
 // if it drifts, that is the signal to revisit the temp-basal IOB term.
@@ -64,6 +63,9 @@ export function compareIob(
   if (now - iob.mills > MAX_SAMPLE_AGE_MS || iob.mills > now + 60_000) {
     return null; // too old to trust the treatment coverage, or future-dated
   }
+  const configuredMax = Number(process.env.IOB_CALIBRATION_MAX_U);
+  const maxIob = Number.isFinite(configuredMax) && configuredMax > 0 ? configuredMax : Infinity;
+  if (!Number.isFinite(iob.iob) || iob.iob < 0 || iob.iob > maxIob) return null;
   const pumpIob = iob.iob;
   const computedIob = calculateIOB(treatments, profile, iob.mills);
   const biasU = round3(computedIob - pumpIob);

@@ -1,3 +1,13 @@
+---
+title: "Installing ClearSugar Community"
+type: reference
+status: active
+tags:
+  - project/clearsugar-community
+  - domain/ai
+  - type/reference
+---
+
 # Installing ClearSugar Community
 
 ClearSugar is a self-hosted dashboard and prediction aid for Type 1 Diabetes

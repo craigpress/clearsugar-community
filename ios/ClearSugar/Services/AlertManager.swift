@@ -9,15 +9,69 @@ final class AlertManager: ObservableObject {
     @Published var lastAlertedSgv: Int?
     @Published var isNotificationsAuthorized = false
 
-    private var lastUrgentAlertDate: Date?
-    private var lastWarningAlertDate: Date?
-    private var lastPumpStaleAlertDate: Date?
-    /// Long, because a pump-sync outage lasts hours and repeating adds nothing.
+    // Cooldown stamps are persisted: as instance vars they reset on every app
+    // relaunch, which re-armed all local alerts each time iOS cycled the
+    // process (one of the 2026-07-24 storm ingredients).
+    private var lastUrgentAlertDate: Date? {
+        get { Self.persistedDate("lastUrgentAlertDate") }
+        set { Self.setPersistedDate("lastUrgentAlertDate", newValue) }
+    }
+    private var lastWarningAlertDate: Date? {
+        get { Self.persistedDate("lastWarningAlertDate") }
+        set { Self.setPersistedDate("lastWarningAlertDate", newValue) }
+    }
+    private var lastPumpStaleAlertDate: Date? {
+        get { Self.persistedDate("lastPumpStaleAlertDate") }
+        set { Self.setPersistedDate("lastPumpStaleAlertDate", newValue) }
+    }
+
+    private static func persistedDate(_ key: String) -> Date? {
+        let t = UserDefaults.standard.double(forKey: key)
+        return t > 0 ? Date(timeIntervalSince1970: t) : nil
+    }
+    private static func setPersistedDate(_ key: String, _ date: Date?) {
+        if let date {
+            UserDefaults.standard.set(date.timeIntervalSince1970, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    // MARK: - Backstop gating state (see LocalAlertGate)
+
+    /// Stamp that a server push (silent background or alert) just arrived —
+    /// proof the push pipeline is alive, which keeps the local backstop quiet.
+    static func recordServerPush() {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "lastServerPushAt")
+    }
+
+    /// Local mirror of the server snooze so the backstop honors silencing even
+    /// when the server can't be reached (which is exactly when it runs).
+    static func recordLocalSnooze(until: Date?, untilRange: Bool) {
+        if let until {
+            UserDefaults.standard.set(until.timeIntervalSince1970, forKey: "localSnoozeUntil")
+        } else {
+            UserDefaults.standard.removeObject(forKey: "localSnoozeUntil")
+        }
+        UserDefaults.standard.set(untilRange, forKey: "localSnoozeUntilRange")
+    }
+
+    private var backstopMayFire: Bool {
+        LocalAlertGate.mayFire(
+            now: Date(),
+            lastServerPush: Self.persistedDate("lastServerPushAt"),
+            snoozedUntil: Self.persistedDate("localSnoozeUntil"),
+            snoozedUntilRange: UserDefaults.standard.bool(forKey: "localSnoozeUntilRange")
+        )
+    }
+    /// Avoid frequent repeats during a prolonged pump-sync outage.
     private let pumpStaleCooldownInterval: TimeInterval = 3 * 60 * 60
     private let urgentRepeatInterval: TimeInterval = 60
     private let warningCooldownInterval: TimeInterval = 30 * 60 // 30 minutes
 
-    private init() {}
+    private init() {
+        Self.retireLegacyDataWatchdog()
+    }
 
     // MARK: - Thresholds from UserDefaults
 
@@ -104,7 +158,7 @@ final class AlertManager: ObservableObject {
             Task { @MainActor in
                 self.isNotificationsAuthorized = granted
                 if let error {
-                    print("Notification permission error: \(error)")
+                    debugLog("Notification permission error: \(error)")
                 }
             }
         }
@@ -126,83 +180,84 @@ final class AlertManager: ObservableObject {
             intentIdentifiers: [],
             options: []
         )
+
         center.setNotificationCategories([urgentCategory, warningCategory])
     }
 
     // MARK: - Evaluate Reading
 
     func evaluate(_ reading: GlucoseReading) {
-        // A sensor error is not a glucose value. Dexcom/Nightscout emit sgv = 0
-        // on sensor error, and the WatchConnectivity init defaults a missing
-        // sgv to 0. Zero is below every low threshold, so without this gate a
-        // sensor fault fires "urgent low - 0 mg/dL - treat with fast carbs",
-        // repeats it, and arms the AlarmKit alarm that sounds through Silent.
-        // Telling someone to treat a low that is not happening is the one
+        // A sensor error is not a glucose value. sgv = 0 (Dexcom/Nightscout
+        // sentinel, and the watch payload's `?? 0` default) is below every low
+        // threshold, so without this gate a sensor fault fired "URGENT LOW —
+        // 0 mg/dL — Treat immediately with fast carbs", repeated it after 60 s,
+        // and armed the AlarmKit alarm that sounds through Silent and Focus.
+        // Telling someone to treat a low that isn't happening is the one
         // failure this path must never produce.
         //
-        // Staleness checks below still run: invalid data is exactly when
-        // "no glucose data" is the alert worth sending.
-        guard reading.isValid else {
-            evaluateStaleness(reading)
-            lastAlertedSgv = reading.sgv
-            return
+        // The separate pump-age check below still runs for invalid CGM data.
+        if reading.isValid {
+            // iOS 26+ urgent-low AlarmKit alarm (no-op below iOS 26 or when disabled)
+            UrgentLowAlarmGate.evaluate(reading, urgentLowThreshold: thresholdUrgentLow)
+
+            let sgv = reading.sgv
+
+            // Determine range category using customizable thresholds
+            let isUrgentLow = sgv < thresholdUrgentLow
+            let isLow = sgv >= thresholdUrgentLow && sgv < thresholdLow
+            let isHigh = sgv > thresholdHigh && sgv <= thresholdUrgentHigh
+            let isUrgentHigh = sgv > thresholdUrgentHigh
+            let isInRange = sgv >= thresholdLow && sgv <= thresholdHigh
+
+            // Backstop gate: while server pushes are arriving, the server owns
+            // glucose alerting and a local notification is a duplicate banner
+            // for the same reading (2026-07-24 duplicate source #1). Haptics and
+            // the AlarmKit urgent-low alarm above stay independent; only the
+            // local NOTIFICATIONS defer. See LocalAlertGate.
+            let localMayFire = backstopMayFire
+
+            if isUrgentLow || isUrgentHigh {
+                if hapticFeedbackEnabled {
+                    triggerHaptic(.heavy)
+                }
+                if alertsUrgentEnabled && localMayFire {
+                    sendUrgentAlert(reading, isLow: isUrgentLow)
+                }
+            } else if isLow {
+                if hapticFeedbackEnabled {
+                    triggerHaptic(.medium)
+                }
+                if alertsLowEnabled && localMayFire {
+                    sendWarningAlert(reading, type: "Low")
+                }
+            } else if isHigh {
+                if hapticFeedbackEnabled {
+                    triggerHaptic(.medium)
+                }
+                if alertsHighEnabled && localMayFire {
+                    sendWarningAlert(reading, type: "High")
+                }
+            } else if isInRange {
+                lastUrgentAlertDate = nil
+                lastWarningAlertDate = nil
+                UNUserNotificationCenter.current().removeDeliveredNotifications(
+                    withIdentifiers: ["urgent-glucose", "warning-glucose"]
+                )
+            }
         }
 
-        let sgv = reading.sgv
+        // Sensor-outage notifications use the server reading age, not app wakeups.
 
-        // Determine range category using customizable thresholds
-        let isUrgentLow = sgv < thresholdUrgentLow
-        let isLow = sgv >= thresholdUrgentLow && sgv < thresholdLow
-        let isHigh = sgv > thresholdHigh && sgv <= thresholdUrgentHigh
-        let isUrgentHigh = sgv > thresholdUrgentHigh
-        let isInRange = sgv >= thresholdLow && sgv <= thresholdHigh
-
-        if isUrgentLow || isUrgentHigh {
-            if hapticFeedbackEnabled {
-                triggerHaptic(.heavy)
-            }
-            if alertsUrgentEnabled {
-                sendUrgentAlert(reading, isLow: isUrgentLow)
-            }
-        } else if isLow {
-            if hapticFeedbackEnabled {
-                triggerHaptic(.medium)
-            }
-            if alertsLowEnabled {
-                sendWarningAlert(reading, type: "Low")
-            }
-        } else if isHigh {
-            if hapticFeedbackEnabled {
-                triggerHaptic(.medium)
-            }
-            if alertsHighEnabled {
-                sendWarningAlert(reading, type: "High")
-            }
-        } else if isInRange {
-            lastUrgentAlertDate = nil
-            lastWarningAlertDate = nil
-            UNUserNotificationCenter.current().removeDeliveredNotifications(
-                withIdentifiers: ["urgent-glucose", "warning-glucose"]
-            )
-        }
-
-        evaluateStaleness(reading)
-        lastAlertedSgv = reading.sgv
-    }
-
-    /// CGM staleness is owned by the dead-man watchdog, which fires ONCE and
-    /// works while the app is suspended. A separate >15-min check here had no
-    /// cooldown, so it re-alerted with sound on every evaluate() - every poll
-    /// while foregrounded and every background refresh - for the whole gap.
-    ///
-    /// Pump staleness is 180 min, not 30: pump data reaches the cloud in long
-    /// batches, so >30 min is the NORMAL state and alerting on it means
-    /// alerting on healthy operation.
-    private func evaluateStaleness(_ reading: GlucoseReading) {
+        // Pump staleness: 180 min, not 30. tconnectsync pulls from Tandem's
+        // cloud, which the pump only uploads to in ~50-min batches, so >30 min
+        // is the NORMAL state and the old threshold alerted on healthy
+        // operation. Three hours means the sync chain is genuinely broken.
         if let pumpStale = reading.pumpIsStale, pumpStale,
            let pumpMins = reading.pumpStaleMinutes, pumpMins > 180 {
             sendPumpStaleAlert(minutesStale: pumpMins)
         }
+
+        lastAlertedSgv = reading.sgv
     }
 
     // MARK: - Urgent Alert
@@ -215,11 +270,14 @@ final class AlertManager: ObservableObject {
         lastUrgentAlertDate = Date()
 
         let content = UNMutableNotificationContent()
-        content.title = isLow ? "URGENT LOW" : "URGENT HIGH"
-        content.body = "\(reading.sgv) mg/dL \(reading.trendArrow) \u{2014} \(isLow ? "Treat immediately with fast carbs" : "Check insulin pump, consider correction")"
+        content.title = (isLow ? "Urgent low · " : "Urgent high · ") + "\(reading.sgv) mg/dL \(reading.trendArrow)"
+        content.body = isLow ? "Treat now with fast carbs." : "Check the pump; consider a correction."
         content.sound = urgentNotificationSound
         content.interruptionLevel = .critical
         content.categoryIdentifier = "URGENT_GLUCOSE"
+        // Same key the server puts in its pushes, so the ACK handler can tell
+        // the server which alert type is being acknowledged.
+        content.userInfo = ["alertType": isLow ? "urgentLow" : "urgentHigh"]
         content.badge = NSNumber(value: reading.sgv)
 
         let request = UNNotificationRequest(
@@ -231,8 +289,8 @@ final class AlertManager: ObservableObject {
 
         // Schedule a repeat alert in 1 minute if still urgent
         let repeatContent = UNMutableNotificationContent()
-        repeatContent.title = isLow ? "STILL URGENT LOW" : "STILL URGENT HIGH"
-        repeatContent.body = "\(reading.sgv) mg/dL \u{2014} Check glucose NOW"
+        repeatContent.title = (isLow ? "Still urgent low · " : "Still urgent high · ") + "\(reading.sgv) mg/dL"
+        repeatContent.body = "Check glucose now."
         repeatContent.sound = urgentNotificationSound
         repeatContent.interruptionLevel = .critical
         repeatContent.categoryIdentifier = "URGENT_GLUCOSE"
@@ -256,14 +314,15 @@ final class AlertManager: ObservableObject {
         lastWarningAlertDate = Date()
 
         let content = UNMutableNotificationContent()
-        content.title = "Glucose \(type)"
-        content.body = "\(reading.sgv) mg/dL \(reading.trendArrow)"
+        content.title = "\(type) · \(reading.sgv) mg/dL \(reading.trendArrow)"
+        content.body = type == "Low" ? "Watch for a further drop." : "Watch for a further rise."
 
         if let sound = warningNotificationSound {
             content.sound = sound
         }
         content.interruptionLevel = .timeSensitive
         content.categoryIdentifier = "GLUCOSE_WARNING"
+        content.userInfo = ["alertType": type == "Low" ? "low" : "high"]
 
         let request = UNNotificationRequest(
             identifier: "warning-glucose",
@@ -273,19 +332,22 @@ final class AlertManager: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-
     // MARK: - Pump Stale Alert
 
     private func sendPumpStaleAlert(minutesStale: Int) {
-        // Cooldown, which this path never had. Re-adding a request with an
-        // existing identifier replaces the banner but still re-delivers sound.
+        // Cooldown, which this path never had. Adding a request with an
+        // existing identifier replaces the banner but still re-delivers with
+        // sound, so an uncooled alert re-fires on every evaluate() for the
+        // whole duration of the outage.
         if let last = lastPumpStaleAlertDate,
-           Date().timeIntervalSince(last) < pumpStaleCooldownInterval { return }
+           Date().timeIntervalSince(last) < pumpStaleCooldownInterval {
+            return
+        }
         lastPumpStaleAlertDate = Date()
 
         let content = UNMutableNotificationContent()
-        content.title = "Pump Connection Lost"
-        content.body = "No pump data for \(minutesStale) minutes. The pump algorithm may not be adjusting insulin."
+        content.title = "Pump data stale"
+        content.body = "Nothing for \(minutesStale / 60)h. Control-IQ may not be adjusting insulin."
         content.sound = .default
         content.interruptionLevel = .timeSensitive
         content.categoryIdentifier = "GLUCOSE_WARNING"
@@ -298,46 +360,21 @@ final class AlertManager: ObservableObject {
         UNUserNotificationCenter.current().add(request)
     }
 
-    // MARK: - Dead-Man Watchdog
+    // MARK: - Fresh readings and legacy notification cleanup
 
-    /// Minutes of silence before the watchdog notification fires.
-    static let watchdogIntervalMinutes = 25
-    private static let watchdogIdentifier = "data-watchdog"
+    /// Preserve the urgent-low alarm on foreground, background-refresh and silent-push updates.
+    func recordGlucoseUpdate(latest reading: GlucoseReading) {
+        UrgentLowAlarmGate.evaluate(reading, urgentLowThreshold: thresholdUrgentLow)
+    }
 
-    /// Schedule a local notification that fires if no glucose data arrives for
-    /// 25 minutes. Call on EVERY successful data update (foreground fetch,
-    /// background refresh, silent push) — each call replaces the previous
-    /// pending notification, so it only fires when the whole update pipeline
-    /// goes quiet. This works even while the app is suspended and the
-    /// server-side push pipeline is down.
-    ///
-    /// Pass the fresh reading so the iOS 26+ urgent-low AlarmKit alarm is
-    /// evaluated on the same three success paths.
-    func rearmDataWatchdog(latest reading: GlucoseReading? = nil) {
-        if let reading {
-            UrgentLowAlarmGate.evaluate(reading, urgentLowThreshold: thresholdUrgentLow)
-        }
-
-        let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [Self.watchdogIdentifier])
-
-        let content = UNMutableNotificationContent()
-        content.title = "No Glucose Data"
-        content.body = "No glucose data for \(Self.watchdogIntervalMinutes) minutes — open ClearSugar."
-        content.sound = .default
-        content.interruptionLevel = .timeSensitive
-        content.categoryIdentifier = "GLUCOSE_WARNING"
-
-        let trigger = UNTimeIntervalNotificationTrigger(
-            timeInterval: TimeInterval(Self.watchdogIntervalMinutes * 60),
-            repeats: false
-        )
-        let request = UNNotificationRequest(
-            identifier: Self.watchdogIdentifier,
-            content: content,
-            trigger: trigger
-        )
-        center.add(request)
+    /// iOS suspension is not evidence of a server or sensor outage. Cancel old
+    /// app-silence timers on launch, including ones scheduled by earlier builds.
+    static func retireLegacyDataWatchdog(
+        removePending: ([String]) -> Void = UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers:),
+        removeDelivered: ([String]) -> Void = UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers:)
+    ) {
+        removePending(["data-watchdog"])
+        removeDelivered(["data-watchdog"])
     }
 
     // MARK: - Haptics

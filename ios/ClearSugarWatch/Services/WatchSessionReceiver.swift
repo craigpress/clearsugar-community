@@ -23,7 +23,7 @@ final class WatchSessionReceiver: NSObject, WCSessionDelegate, ObservableObject 
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         if let error {
-            print("WCSession activation failed: \(error)")
+            debugLog("WCSession activation failed: \(error)")
         }
         // Check for any existing application context
         if !session.receivedApplicationContext.isEmpty {

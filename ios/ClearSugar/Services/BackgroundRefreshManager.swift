@@ -35,7 +35,7 @@ final class BackgroundRefreshManager: Sendable {
         do {
             try BGTaskScheduler.shared.submit(request)
         } catch {
-            print("Failed to schedule background refresh: \(error)")
+            debugLog("Failed to schedule background refresh: \(error)")
         }
     }
 
@@ -105,10 +105,10 @@ final class BackgroundRefreshManager: Sendable {
                     UIApplication.shared.applicationIconBadgeNumber = reading.sgv
                 }
 
-                // Evaluate alerts + re-arm the dead-man watchdog
+                // Evaluate local glucose alarms; server owns sensor-age outage alerts.
                 await MainActor.run {
                     AlertManager.shared.evaluate(reading)
-                    AlertManager.shared.rearmDataWatchdog(latest: reading)
+                    AlertManager.shared.recordGlucoseUpdate(latest: reading)
                 }
 
                 recordOutcome(success: true)

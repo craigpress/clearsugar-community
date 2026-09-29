@@ -82,19 +82,12 @@ struct GlucoseReading: Codable, Sendable {
     /// low threshold", so every consumer that compares thresholds MUST gate on
     /// this first — otherwise a sensor fault reads as the most severe possible
     /// hypo. See AlertManager.evaluate and UrgentLowAlarmGate.evaluate.
-    var isValid: Bool { sgv > 0 && sgv < 600 }
+    var isValid: Bool { sgv > 12 && sgv < 600 }
 
     var rangeCategory: RangeCategory {
         // Display-only fallback. Alert and alarm paths gate on `isValid` and
         // never reach this; do not add clinical decisions here.
-        guard isValid else { return .urgentLow } // Sensor error
-        switch sgv {
-        case ..<55:     return .urgentLow
-        case 55..<70:   return .low
-        case 70...180:  return .inRange
-        case 181...250: return .high
-        default:        return .urgentHigh
-        }
+        RangeCategory.classify(sgv) ?? .urgentLow
     }
 
     var deltaString: String {
@@ -132,11 +125,11 @@ struct GlucoseReading: Codable, Sendable {
     var urgencyGuidance: String? {
         switch rangeCategory {
         case .urgentLow:
-            return "Treat immediately with fast carbs"
+            return "Treat now with fast carbs"
         case .urgentHigh:
-            return "Check insulin pump, consider correction"
+            return "Check the pump; consider a correction"
         case .low where direction == "SingleDown" || direction == "DoubleDown":
-            return "Glucose dropping — check now"
+            return "Dropping — check now"
         default:
             return nil
         }
@@ -162,18 +155,6 @@ struct GlucoseReading: Codable, Sendable {
         return payload
     }
 
-    /// Initialize from WatchConnectivity payload
-    init(fromWatchPayload payload: [String: Any]) {
-        self.sgv = payload["sgv"] as? Int ?? 0
-        self.direction = payload["direction"] as? String ?? "NOT COMPUTABLE"
-        self.date = payload["date"] as? TimeInterval ?? 0
-        self.dateString = nil
-        self.delta = payload["delta"] as? Double
-        self.pumpLastUpdate = nil
-        self.pumpStaleMinutes = payload["pumpStaleMinutes"] as? Int
-        self.pumpIsStale = payload["pumpIsStale"] as? Bool
-    }
-
     // MARK: - Accessibility
 
     var accessibilityDescription: String {
@@ -190,6 +171,25 @@ struct GlucoseReading: Codable, Sendable {
     }
 }
 
+// MARK: - Watch Payload Init
+
+// Declared in an extension, not in the struct body: an initializer inside the
+// declaration suppresses the synthesized memberwise init, which the unit tests
+// use to build readings at the validity boundaries.
+extension GlucoseReading {
+    /// Initialize from WatchConnectivity payload
+    init(fromWatchPayload payload: [String: Any]) {
+        self.sgv = payload["sgv"] as? Int ?? 0
+        self.direction = payload["direction"] as? String ?? "NOT COMPUTABLE"
+        self.date = payload["date"] as? TimeInterval ?? 0
+        self.dateString = nil
+        self.delta = payload["delta"] as? Double
+        self.pumpLastUpdate = nil
+        self.pumpStaleMinutes = payload["pumpStaleMinutes"] as? Int
+        self.pumpIsStale = payload["pumpIsStale"] as? Bool
+    }
+}
+
 // MARK: - Range Category
 
 enum RangeCategory: String, Codable, Sendable {
@@ -197,6 +197,17 @@ enum RangeCategory: String, Codable, Sendable {
 }
 
 extension RangeCategory {
+    static func classify(_ sgv: Int) -> RangeCategory? {
+        guard sgv > 12 && sgv < 600 else { return nil }
+        switch sgv {
+        case ..<55: return .urgentLow
+        case 55..<70: return .low
+        case 70...180: return .inRange
+        case 181...250: return .high
+        default: return .urgentHigh
+        }
+    }
+
     var isUrgent: Bool {
         self == .urgentLow || self == .urgentHigh
     }

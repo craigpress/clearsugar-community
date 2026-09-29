@@ -1,3 +1,13 @@
+---
+title: "ClearSugar Companion App (iOS + watchOS)"
+type: reference
+status: active
+tags:
+  - project/clearsugar-community
+  - domain/ai
+  - type/reference
+---
+
 # ClearSugar Companion App (iOS + watchOS)
 
 Native iPhone and Apple Watch companion for your self-hosted ClearSugar server:
@@ -19,7 +29,7 @@ the phone between polls — see "Push (optional)" below.
 
 ## Requirements
 
-- A Mac with Xcode 16 or newer
+- A Mac with Xcode 26 or newer
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
 - An Apple Developer account — the free tier works for everything except push
   (see below)

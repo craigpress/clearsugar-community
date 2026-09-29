@@ -6,6 +6,7 @@ import { GLUCOSE_RANGES } from "../types";
 import type { PredictionPoint, PredictionHorizon } from "./types";
 import type { InferredRescueCarb } from "./rescue-carb-detector";
 import { calculateInferredCOB } from "./rescue-carb-detector";
+import { treatmentTime } from "../time";
 
 const FIVE_MIN_MS = 5 * 60_000;
 
@@ -107,10 +108,6 @@ export function calculateIOBForAutosens(
 }
 
 // ── Helpers ──
-
-function treatmentTime(t: Treatment): number {
-  return t.mills || new Date(t.created_at).getTime();
-}
 
 /** Get the active profile store entry */
 function getActiveProfile(profile: PumpProfile) {

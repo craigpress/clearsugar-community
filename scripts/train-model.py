@@ -230,7 +230,7 @@ def train_models(df: pd.DataFrame, val_cutoff: int) -> dict:
         hi_s = pred_abs + (hi_raw - pred_abs) * band_scale
         cov_scaled = float(np.mean((actual_abs >= lo_s) & (actual_abs <= hi_s)))
         print(f" RMSE: {rmse:.1f}, MAE: {mae:.1f}, "
-              f"cov {cov_raw:.2f}->{cov_scaled:.2f} (scale {band_scale:.2f})")
+              f"cov {cov_raw:.20f}->{cov_scaled:.20f} (scale {band_scale:.20f})")
 
         importance = dict(zip(FEATURE_NAMES, model.feature_importance("gain")))
         total = sum(importance.values()) or 1

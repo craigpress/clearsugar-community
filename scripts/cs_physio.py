@@ -554,9 +554,9 @@ if __name__ == "__main__":
     readings = [{"date": int(e["date"]), "sgv": e["sgv"]} for e in entries if e.get("sgv")]
     now = max(r["date"] for r in readings) if readings else 0
     print(f"profile dia={prof['dia']}h  treatments={len(treats)}  readings={len(readings)}")
-    print(f"IOB now = {calc_iob(treats, now, prof):.2f} u")
+    print(f"IOB now = {calc_iob(treats, now, prof):.20f} u")
     print(f"COB now = {calc_cob(treats, now):.1f} g")
-    print(f"ROC = {estimate_roc(readings):.2f} mg/dL/5min")
+    print(f"ROC = {estimate_roc(readings):.20f} mg/dL/5min")
     print(f"autosens = {autosens_ratio(readings, treats, prof):.3f}")
     pred = predict_physiological(readings, treats, prof, 60)
     predmf = predict_physiological(readings, treats, prof, 60, include_momentum=False)

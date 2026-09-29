@@ -19,6 +19,7 @@ import type {
   ResolutionAttribution,
 } from "./advisor-types";
 import type { GlucoseReading, Treatment } from "../types";
+import { treatmentTime } from "../time";
 
 const FEEDBACK_KEY = "advisor/feedback.json";
 
@@ -72,12 +73,6 @@ export async function recordFired(
 }
 
 // ── Treatment classification helpers (pure) ────────────────────────────────────
-
-function treatmentTime(t: Treatment): number {
-  return typeof t.mills === "number" && t.mills > 0
-    ? t.mills
-    : Date.parse(t.created_at);
-}
 
 /** A Control-IQ algorithmic temp basal — the pump acting on its own. */
 function isCiqAlgorithmBasal(t: Treatment): boolean {

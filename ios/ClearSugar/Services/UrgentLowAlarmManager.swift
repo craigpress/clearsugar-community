@@ -68,8 +68,7 @@ final class UrgentLowAlarmManager {
 
     // MARK: - Evaluate Reading
 
-    /// Called with every fresh reading from the same hook that re-arms the
-    /// dead-man watchdog (foreground fetch, BG refresh, silent push).
+    /// Called with every fresh reading from foreground fetch, BG refresh, or silent push.
     func evaluate(_ reading: GlucoseReading, urgentLowThreshold: Int) {
         guard isEnabled else { return }
 
@@ -144,7 +143,7 @@ final class UrgentLowAlarmManager {
             _ = try await manager.schedule(id: id, configuration: configuration)
             defaults.set(Date().timeIntervalSince1970, forKey: Self.lastFiredKey)
         } catch {
-            print("UrgentLowAlarm schedule failed: \(error)")
+            debugLog("UrgentLowAlarm schedule failed: \(error)")
         }
     }
 
@@ -173,7 +172,7 @@ final class UrgentLowAlarmManager {
         do {
             return try await manager.requestAuthorization() == .authorized
         } catch {
-            print("UrgentLowAlarm authorization failed: \(error)")
+            debugLog("UrgentLowAlarm authorization failed: \(error)")
             return false
         }
     }

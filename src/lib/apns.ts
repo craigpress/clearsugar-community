@@ -1,13 +1,11 @@
 import { SignJWT, importPKCS8 } from "jose";
 import http2 from "node:http2";
+import { buildLiveActivityPayload } from "./apns-payload";
 
 // Trim all env vars to remove trailing newlines
 const APNS_KEY_ID = (process.env.APNS_KEY_ID ?? "").trim();
 const APNS_TEAM_ID = (process.env.APNS_TEAM_ID ?? "").trim();
 const APNS_PRIVATE_KEY_B64 = (process.env.APNS_PRIVATE_KEY_B64 ?? "").trim();
-// No default — every deployment must set its own bundle ID. Push functions
-// no-op (with a clear log) rather than send to someone else's app.
-const APNS_BUNDLE_ID = (process.env.APNS_BUNDLE_ID ?? "").trim();
 
 // Use sandbox for development-signed iOS apps, production for App Store builds
 const APNS_HOST = process.env.APNS_SANDBOX === "true"
@@ -39,8 +37,8 @@ async function getAPNsToken(): Promise<string> {
 /**
  * Delivery tier → iOS interruption-level. "critical" is intentionally NOT
  * supported: it requires Apple's Critical Alerts entitlement. There is NO house
- * alarm / siren channel; the loudest channel ClearSugar uses is the phone
- * "time-sensitive" push.
+ * alarm / siren channel; the loudest
+ * channel ClearSugar uses is the phone "time-sensitive" push.
  */
 export type AlertInterruptionLevel = "passive" | "active" | "time-sensitive";
 
@@ -61,19 +59,21 @@ export async function pushAlertNotification(
   category?: string,
   interruptionLevel: AlertInterruptionLevel = "active",
   opts?: {
-    /** apns-collapse-id: a repeat of the same alert REPLACES the previous
-     *  banner instead of stacking a new one. Without it a sustained high
-     *  leaves a pile of identical banners on the lock screen. */
+    /** apns-collapse-id: a repeat of the same alert replaces the previous banner
+     *  instead of stacking a new one (2026-07-24 storm: 8 stacked "Glucose High"
+     *  banners per phone). */
     collapseId?: string;
     /** Custom payload key so the iOS ACK handler knows which alert type it is
      *  acknowledging (needed for the per-device, per-type server ack). */
     alertType?: string;
+    /** Extra custom keys merged beside `aps` (APNs allows any top-level key
+     *  outside `aps`; iOS surfaces them as `userInfo`). Used by the meal prompt
+     *  to carry `{ kind, episodeId, trigger, bolusAt, carbs, insulin }` so the
+     *  reply action knows which episode it is answering. Spread FIRST so it can
+     *  never clobber `aps` or the existing `alertType` key. */
+    userInfo?: Record<string, unknown>;
   },
 ): Promise<{ success: boolean; status: number }> {
-  if (!APNS_BUNDLE_ID) {
-    console.error("[apns] APNS_BUNDLE_ID not set — skipping alert push");
-    return { success: false, status: 0 };
-  }
   const token = await getAPNsToken();
   const apnsPriority = interruptionLevel === "passive" ? "5" : "10";
 
@@ -84,6 +84,7 @@ export async function pushAlertNotification(
       "interruption-level": interruptionLevel,
       ...(category && { category }),
     },
+    ...(opts?.userInfo ?? {}),
     ...(opts?.alertType && { alertType: opts.alertType }),
   });
 
@@ -107,7 +108,7 @@ export async function pushAlertNotification(
       ":method": "POST",
       ":path": `/3/device/${pushToken}`,
       authorization: `bearer ${token}`,
-      "apns-topic": APNS_BUNDLE_ID,
+      "apns-topic": (process.env.APNS_BUNDLE_ID ?? "").trim(),
       "apns-push-type": "alert",
       "apns-priority": apnsPriority,
       ...(opts?.collapseId && { "apns-collapse-id": opts.collapseId }),
@@ -153,10 +154,6 @@ export async function pushSilentBackground(
   pushToken: string,
   badge?: number,
 ): Promise<{ success: boolean; status: number }> {
-  if (!APNS_BUNDLE_ID) {
-    console.error("[apns] APNS_BUNDLE_ID not set — skipping silent push");
-    return { success: false, status: 0 };
-  }
   const token = await getAPNsToken();
 
   const payload = JSON.stringify({
@@ -186,7 +183,7 @@ export async function pushSilentBackground(
       ":method": "POST",
       ":path": `/3/device/${pushToken}`,
       authorization: `bearer ${token}`,
-      "apns-topic": APNS_BUNDLE_ID,
+      "apns-topic": (process.env.APNS_BUNDLE_ID ?? "").trim(),
       "apns-push-type": "background",
       "apns-priority": "5",
       "content-type": "application/json",
@@ -233,21 +230,38 @@ export async function pushLiveActivityUpdate(
   staleDate?: number,
   dismissalDate?: number
 ): Promise<{ success: boolean; status: number }> {
-  if (!APNS_BUNDLE_ID) {
-    console.error("[apns] APNS_BUNDLE_ID not set — skipping Live Activity push");
-    return { success: false, status: 0 };
-  }
-  const token = await getAPNsToken();
+  return sendLiveActivityRaw(
+    pushToken,
+    buildLiveActivityPayload({ event: "update", contentState, staleDate, dismissalDate }),
+  );
+}
 
-  const payload = JSON.stringify({
-    aps: {
-      timestamp: Math.floor(Date.now() / 1000),
-      event: "update",
-      "content-state": contentState,
-      ...(staleDate && { "stale-date": staleDate }),
-      ...(dismissalDate && { "dismissal-date": dismissalDate }),
-    },
-  });
+/**
+ * Start (or restart) a Live Activity via APNs push-to-start (iOS 17.2+). Sent to
+ * a pushToStart token so the Lock-Screen activity can be (re)created without the
+ * app running.
+ */
+export async function pushLiveActivityStart(
+  pushToStartToken: string,
+  contentState: Record<string, unknown>,
+  staleDate?: number,
+  attributesType = "GlucoseActivityAttributes",
+): Promise<{ success: boolean; status: number }> {
+  return sendLiveActivityRaw(
+    pushToStartToken,
+    buildLiveActivityPayload({ event: "start", contentState, staleDate, attributesType, attributes: {} }),
+  );
+}
+
+/**
+ * Shared HTTP/2 exchange for a Live Activity push (start or update). Same
+ * apns-topic / push-type / priority and 10s timeout for both events.
+ */
+async function sendLiveActivityRaw(
+  pushToken: string,
+  payload: string,
+): Promise<{ success: boolean; status: number }> {
+  const token = await getAPNsToken();
 
   return new Promise((resolve, reject) => {
     const client = http2.connect(`https://${APNS_HOST}`);
@@ -269,7 +283,7 @@ export async function pushLiveActivityUpdate(
       ":method": "POST",
       ":path": `/3/device/${pushToken}`,
       authorization: `bearer ${token}`,
-      "apns-topic": `${APNS_BUNDLE_ID}.push-type.liveactivity`,
+      "apns-topic": `${(process.env.APNS_BUNDLE_ID ?? "").trim()}.push-type.liveactivity`,
       "apns-push-type": "liveactivity",
       "apns-priority": "10",
       "content-type": "application/json",

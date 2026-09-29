@@ -36,7 +36,7 @@ final class WatchSessionManager: NSObject, WCSessionDelegate, ObservableObject, 
 
     func session(_ session: WCSession, activationDidCompleteWith activationState: WCSessionActivationState, error: Error?) {
         if let error {
-            print("WCSession activation failed: \(error)")
+            debugLog("WCSession activation failed: \(error)")
         }
     }
 

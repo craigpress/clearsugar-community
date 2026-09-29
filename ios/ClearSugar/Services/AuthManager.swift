@@ -34,7 +34,7 @@ final class AuthManager: NSObject {
 
     private func loadAuthState() {
         if let jwt = Self.loadFromKeychain(service: AppConfig.jwtKeychainService) {
-            print("[Auth] Found JWT in Keychain (\(jwt.prefix(20))...)")
+            debugLog("[Auth] Found JWT in Keychain (\(jwt.prefix(20))...)")
             // Decode JWT to check expiry (without verifying signature — server does that)
             if let payload = decodeJWTPayload(jwt),
                let exp = payload["exp"] as? TimeInterval {
@@ -42,35 +42,35 @@ final class AuthManager: NSObject {
                 if expiryDate > Date() {
                     authMethod = .credentials
                     username = (payload["name"] as? String) ?? (payload["sub"] as? String)
-                    print("[Auth] JWT valid, expires \(expiryDate)")
+                    debugLog("[Auth] JWT valid, expires \(expiryDate)")
                     return
                 } else if loadStoredCredentials() != nil {
                     // Expired but we can silently re-login — stay authenticated
                     // and let refreshTokenIfNeeded() (called on launch/foreground)
                     // fetch a fresh token.
-                    print("[Auth] JWT expired at \(expiryDate) — will refresh with stored credentials")
+                    debugLog("[Auth] JWT expired at \(expiryDate) — will refresh with stored credentials")
                     authMethod = .credentials
                     username = (payload["name"] as? String) ?? (payload["sub"] as? String)
                     return
                 } else {
-                    print("[Auth] JWT expired at \(expiryDate), no stored credentials — clearing")
+                    debugLog("[Auth] JWT expired at \(expiryDate), no stored credentials — clearing")
                     Self.deleteFromKeychain(service: AppConfig.jwtKeychainService)
                 }
             } else {
-                print("[Auth] JWT decode failed — clearing")
+                debugLog("[Auth] JWT decode failed — clearing")
                 Self.deleteFromKeychain(service: AppConfig.jwtKeychainService)
             }
         } else {
-            print("[Auth] No JWT in Keychain")
+            debugLog("[Auth] No JWT in Keychain")
         }
 
         if let apiKey = Self.loadFromKeychain(service: AppConfig.apiKeyKeychainService), !apiKey.isEmpty {
-            print("[Auth] Found API key in Keychain")
+            debugLog("[Auth] Found API key in Keychain")
             authMethod = .apiKey
             return
         }
 
-        print("[Auth] No saved auth — showing setup")
+        debugLog("[Auth] No saved auth — showing setup")
         authMethod = .none
     }
 
@@ -112,7 +112,7 @@ final class AuthManager: NSObject {
                 case 429: lastAuthError = "Too many attempts — try again later."
                 default:  lastAuthError = "Server error (HTTP \(http.statusCode))."
                 }
-                print("[Auth] Token request HTTP \(http.statusCode)")
+                debugLog("[Auth] Token request HTTP \(http.statusCode)")
                 return false
             }
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -136,7 +136,7 @@ final class AuthManager: NSObject {
             return true
         } catch {
             lastAuthError = "Network error: \(error.localizedDescription)"
-            print("[Auth] Token request error: \(error)")
+            debugLog("[Auth] Token request error: \(error)")
             return false
         }
     }
@@ -161,12 +161,12 @@ final class AuthManager: NSObject {
         }
 
         guard let creds = loadStoredCredentials() else {
-            print("[Auth] JWT expiring \(expiryDate), no stored credentials — needs re-login")
+            debugLog("[Auth] JWT expiring \(expiryDate), no stored credentials — needs re-login")
             needsReauth = true
             return
         }
 
-        print("[Auth] JWT expiring \(expiryDate) — refreshing with stored credentials")
+        debugLog("[Auth] JWT expiring \(expiryDate) — refreshing with stored credentials")
         let ok = await login(username: creds.username, password: creds.password)
         if ok {
             needsReauth = false
@@ -287,7 +287,7 @@ final class AuthManager: NSObject {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status != errSecSuccess {
-            print("[Keychain] Load \(accountForService(service)): OSStatus \(status)")
+            debugLog("[Keychain] Load \(accountForService(service)): OSStatus \(status)")
         }
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
@@ -306,9 +306,9 @@ final class AuthManager: NSObject {
         ]
         let status = SecItemAdd(query as CFDictionary, nil)
         if status == errSecSuccess {
-            print("[Keychain] Saved \(accountForService(service)) successfully")
+            debugLog("[Keychain] Saved \(accountForService(service)) successfully")
         } else {
-            print("[Keychain] FAILED to save \(accountForService(service)): OSStatus \(status)")
+            debugLog("[Keychain] FAILED to save \(accountForService(service)): OSStatus \(status)")
         }
     }
 

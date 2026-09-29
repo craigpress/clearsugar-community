@@ -24,11 +24,11 @@ export type CiqMode = "sleep" | "exercise" | "normal";
 
 const MIN = 60_000;
 
-// Pump sleep schedule fallback when the pump-state doc is absent: the patient's
-// actual configured Control-IQ Sleep schedule, 22:00–05:00 local (startMin/endMin
-// are minutes from local midnight, matching the pump's representation).
-const FALLBACK_SLEEP_START_MIN = 22 * 60; // 1320
-const FALLBACK_SLEEP_END_MIN = 5 * 60; // 300
+// Generic quiet hours when no pump schedule is available, in local minutes.
+function quietMinute(value: string | undefined, fallback: number): number {
+  const minute = value === undefined || value.trim() === "" ? NaN : Number(value);
+  return Number.isInteger(minute) && minute >= 0 && minute < 1440 ? minute : fallback;
+}
 
 /** Local minutes-from-midnight for a timestamp (host-local, like isNight). */
 function localMinOfDay(atTime: number): number {
@@ -39,14 +39,14 @@ function localMinOfDay(atTime: number): number {
 /**
  * Is `atTime` within the pump's Sleep-schedule window? Uses the published pump
  * sleepSchedule (start/end minutes, when enabled) and otherwise falls back to
- * the known 22:00–05:00. The window wraps midnight.
+ * configured quiet hours (default 22:00–07:00). The window wraps midnight.
  */
 export function isPumpSleep(
   atTime: number,
   sleep?: PumpState["controlIQ"]["sleepSchedule"] | null
 ): boolean {
-  let start = FALLBACK_SLEEP_START_MIN;
-  let end = FALLBACK_SLEEP_END_MIN;
+  let start = quietMinute(process.env.QUIET_HOURS_START_MIN, 22 * 60);
+  let end = quietMinute(process.env.QUIET_HOURS_END_MIN, 7 * 60);
   if (
     sleep &&
     sleep.enabled !== false &&

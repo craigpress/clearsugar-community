@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct GlucoseView: View {
+    @ScaledMetric(relativeTo: .title2) private var glucoseHeaderSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .caption2) private var ageSize: CGFloat = 10
     @ObservedObject var receiver = WatchSessionReceiver.shared
 
     var body: some View {
@@ -47,7 +49,7 @@ struct GlucoseView: View {
                         .foregroundStyle(carbAmber)
                 }
             }
-            .font(.system(size: 22, weight: .bold, design: .rounded))
+            .font(.system(size: glucoseHeaderSize, weight: .bold, design: .rounded))
             .minimumScaleFactor(0.7)
             .lineLimit(1)
 
@@ -63,7 +65,7 @@ struct GlucoseView: View {
             // Time ago
             let mins = reading.minutesAgo
             Text(mins <= 1 ? "Just now" : "\(mins)m ago")
-                .font(.system(size: 10, design: .rounded))
+                .font(.system(size: ageSize, design: .rounded))
                 .foregroundStyle(stalenessColor(minutesAgo: mins))
         }
         .accessibilityElement(children: .combine)

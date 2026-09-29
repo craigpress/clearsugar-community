@@ -34,6 +34,7 @@
 import type { Treatment, PumpProfile } from "../types";
 import { calculateIOB, calculateCOB } from "./physiological-model";
 import type { AdvisorInput, AdvisoryAction } from "./advisor-types";
+import { treatmentTime } from "../time";
 
 // ── Tunable thresholds (validated defaults — match the Python) ──
 const MIN_MS = 60_000;
@@ -55,10 +56,6 @@ const BG_TOLERANCE_MS = 8 * MIN_MS; // nearest-sgv match tolerance
 // ── Profile helpers (faithful to the private getScheduledValue in
 // physiological-model.ts; re-implemented here because that helper is not
 // exported and delivered_in_window needs the scheduled basal directly). ──
-
-function treatmentTime(t: Treatment): number {
-  return t.mills || new Date(t.created_at).getTime();
-}
 
 function getScheduledValue(
   schedule: { time: string; value: number; timeAsSeconds: number }[],

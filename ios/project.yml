@@ -48,6 +48,7 @@ targets:
           - "Complications/**"
       - ClearSugar/Models/GlucoseReading.swift
       - ClearSugar/Shared/AppConfig.swift
+      - ClearSugar/Shared/DebugLog.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(CLEARSUGAR_BUNDLE_PREFIX).watchkitapp
@@ -64,7 +65,9 @@ targets:
       - ClearSugar/Widgets
       - ClearSugar/Models/GlucoseReading.swift
       - ClearSugar/Shared/AppConfig.swift
+      - ClearSugar/Shared/DebugLog.swift
       - ClearSugar/Shared/GlucoseActivityAttributes.swift
+      - ClearSugar/Shared/GlucoseWidgetEntry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(CLEARSUGAR_BUNDLE_PREFIX).widgets
@@ -78,8 +81,20 @@ targets:
       - ClearSugarWatch/Complications
       - ClearSugar/Models/GlucoseReading.swift
       - ClearSugar/Shared/AppConfig.swift
+      - ClearSugar/Shared/DebugLog.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(CLEARSUGAR_BUNDLE_PREFIX).watchkitapp.complications
         INFOPLIST_FILE: ClearSugarWatch/Complications/Info.plist
         CODE_SIGN_ENTITLEMENTS: ClearSugarWatch/Complications/Complications.entitlements
+
+  ClearSugarTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [ClearSugarTests]
+    dependencies:
+      - target: ClearSugar
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: $(CLEARSUGAR_BUNDLE_PREFIX).tests

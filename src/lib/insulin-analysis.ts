@@ -1,12 +1,8 @@
 // ClearSugar — Insulin response and basal adequacy analysis
 
 import type { GlucoseReading, Treatment } from "./types";
-import { localHour, localDateKey } from "./time";
+import { localHour, localDateKey, treatmentTime } from "./time";
 import { minOf, maxOf } from "./stats-util";
-
-function treatmentTime(t: Treatment): number {
-  return t.mills || new Date(t.created_at).getTime();
-}
 
 // ── Site Change / Infusion Set Age Tracking ──
 

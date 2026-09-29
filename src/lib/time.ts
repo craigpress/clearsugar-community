@@ -5,7 +5,16 @@
 // compute hour/day/date in the patient's timezone using Intl.DateTimeFormat,
 // so they never rely on the server's local time.
 
+import type { Treatment } from "./types";
+
 export const PATIENT_TZ = "America/New_York";
+
+/** Canonical epoch-ms timestamp for a treatment. */
+export function treatmentTime(t: Treatment): number {
+  return typeof t.mills === "number" && t.mills > 0
+    ? t.mills
+    : Date.parse(t.created_at);
+}
 
 const hourFmt = new Intl.DateTimeFormat("en-US", {
   timeZone: PATIENT_TZ,

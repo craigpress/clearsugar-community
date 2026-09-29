@@ -2,52 +2,6 @@ import SwiftUI
 import WidgetKit
 import Security
 
-// MARK: - Widget Entry
-
-struct GlucoseWidgetEntry: TimelineEntry {
-    let date: Date
-    let sgv: Int
-    let trendArrow: String
-    let deltaString: String
-    let rangeCategory: RangeCategory
-    let minutesAgo: Int
-    let sparklineValues: [Int]
-    let predictionValues: [Int]
-    let iob: String?
-    let cob: String?
-    let isStale: Bool
-    /// False when the cached reading has no timestamp — age is unknown,
-    /// so views render "—" instead of a fake "0m ago".
-    let hasTimestamp: Bool
-
-    /// Age label: "3m ago" normally, "—" when the reading age is unknown.
-    var ageText: String {
-        hasTimestamp ? "\(minutesAgo)m ago" : "\u{2014}"
-    }
-
-    /// Short age label for compact widgets.
-    var ageTextShort: String {
-        hasTimestamp ? "\(minutesAgo)m" : "\u{2014}"
-    }
-
-    static var placeholder: GlucoseWidgetEntry {
-        GlucoseWidgetEntry(
-            date: Date(),
-            sgv: 120,
-            trendArrow: "\u{2192}",
-            deltaString: "+2",
-            rangeCategory: .inRange,
-            minutesAgo: 2,
-            sparklineValues: [110, 115, 118, 120, 122, 120, 118, 120, 125, 122, 120],
-            predictionValues: [120, 125, 130, 135, 138, 140],
-            iob: "4.2 u",
-            cob: "25 g",
-            isStale: false,
-            hasTimestamp: true
-        )
-    }
-}
-
 // MARK: - Keychain Helper (mirrors AuthManager.loadFromKeychain)
 
 private func loadFromKeychain(service: String) -> String? {
@@ -97,9 +51,7 @@ struct GlucoseTimelineProvider: TimelineProvider {
 
     /// Lightweight fetch for widget — single attempt, 5s timeout, fail silently
     private func fetchAndCacheLatest() async {
-        // Server must be configured (baked into Info.plist or entered in SetupView)
         guard let baseURL = AppConfig.serverURL else { return }
-
         // Read auth from shared Keychain
         let jwt = loadFromKeychain(service: AppConfig.jwtKeychainService)
         let apiKey = loadFromKeychain(service: AppConfig.apiKeyKeychainService)
@@ -111,8 +63,7 @@ struct GlucoseTimelineProvider: TimelineProvider {
         let session = URLSession(configuration: config)
 
         // Fetch latest glucose
-        do {
-            let url = baseURL.appendingPathComponent("api/glucose/latest")
+        if let url = URL(string: "\(baseURL.absoluteString)/api/glucose/latest") {
             var request = URLRequest(url: url)
             if let jwt, !jwt.isEmpty {
                 request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
@@ -124,7 +75,7 @@ struct GlucoseTimelineProvider: TimelineProvider {
             if let (data, response) = try? await session.data(for: request),
                let http = response as? HTTPURLResponse, http.statusCode == 200,
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let sgv = json["sgv"] as? Int, sgv > 0, sgv < 600 {
+               let sgv = json["sgv"] as? Int, sgv > 12, sgv < 600 {
                 defaults.set(sgv, forKey: "cached_sgv")
                 if let direction = json["direction"] as? String {
                     defaults.set(direction, forKey: "cached_direction")
@@ -140,8 +91,7 @@ struct GlucoseTimelineProvider: TimelineProvider {
         }
 
         // Fetch IOB/COB
-        do {
-            let url = baseURL.appendingPathComponent("api/pump/iob")
+        if let url = URL(string: "\(baseURL.absoluteString)/api/pump/iob") {
             var request = URLRequest(url: url)
             if let jwt, !jwt.isEmpty {
                 request.setValue("Bearer \(jwt)", forHTTPHeaderField: "Authorization")
@@ -202,16 +152,7 @@ struct GlucoseTimelineProvider: TimelineProvider {
         }()
 
         // Compute range category
-        let rangeCategory: RangeCategory = {
-            guard sgv > 0 && sgv < 600 else { return .urgentLow }
-            switch sgv {
-            case ..<55:     return .urgentLow
-            case 55..<70:   return .low
-            case 70...180:  return .inRange
-            case 181...250: return .high
-            default:        return .urgentHigh
-            }
-        }()
+        let rangeCategory = RangeCategory.classify(sgv) ?? .urgentLow
 
         // Compute delta string
         let deltaString: String = {
@@ -236,8 +177,8 @@ struct GlucoseTimelineProvider: TimelineProvider {
         let isStale = !hasTimestamp || minutesAgo > 15
 
         // Guard against no data at all
-        guard sgv > 0 else {
-            return .placeholder
+        guard sgv > 12 && sgv < 600 else {
+            return .noData
         }
 
         return GlucoseWidgetEntry(
@@ -298,13 +239,14 @@ struct GlucoseSmallWidget: Widget {
 
 private struct GlucoseSmallView: View {
     let entry: GlucoseWidgetEntry
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 40
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             // Top row: glucose + arrow + IOB/COB
             HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text("\(entry.sgv)")
-                    .font(.system(size: 40, weight: .bold, design: .rounded))
+                Text(entry.glucoseText)
+                    .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                     .foregroundStyle(valueColor(for: entry))
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
@@ -346,7 +288,7 @@ private struct GlucoseSmallView: View {
 
             Spacer(minLength: 2)
 
-            // Bottom: time ago ("—" when the reading age is unknown)
+            // Bottom: time ago
             HStack {
                 Spacer()
                 Text(entry.ageText)
@@ -388,6 +330,7 @@ struct GlucoseMediumWidget: Widget {
 private struct GlucoseMediumView: View {
     @Environment(\.widgetFamily) private var family
     let entry: GlucoseWidgetEntry
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 44
 
     var body: some View {
         #if compiler(>=6.4) // Requires iOS 27 SDK (Xcode 27, Swift 6.4); compiled out on older toolchains.
@@ -411,8 +354,8 @@ private struct GlucoseMediumView: View {
             VStack(alignment: .leading, spacing: 4) {
                 // Glucose + arrow
                 HStack(alignment: .firstTextBaseline, spacing: 3) {
-                    Text("\(entry.sgv)")
-                        .font(.system(size: 44, weight: .bold, design: .rounded))
+                    Text(entry.glucoseText)
+                        .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                         .foregroundStyle(valueColor(for: entry))
                         .minimumScaleFactor(0.7)
                         .lineLimit(1)
@@ -468,6 +411,7 @@ private struct GlucoseMediumView: View {
 @available(iOS 27.0, *)
 private struct GlucoseExtraLargePortraitView: View {
     let entry: GlucoseWidgetEntry
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 72
 
     var body: some View {
         VStack(spacing: 16) {
@@ -487,8 +431,8 @@ private struct GlucoseExtraLargePortraitView: View {
 
             // Stat row below: glucose + arrow + delta left, IOB/COB/age right
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text("\(entry.sgv)")
-                    .font(.system(size: 72, weight: .bold, design: .rounded))
+                Text(entry.glucoseText)
+                    .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                     .foregroundStyle(valueColor(for: entry))
                     .minimumScaleFactor(0.7)
                     .lineLimit(1)
@@ -541,11 +485,12 @@ struct GlucoseAccessoryCircularWidget: Widget {
 
 private struct GlucoseAccessoryCircularView: View {
     let entry: GlucoseWidgetEntry
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 22
 
     var body: some View {
         VStack(spacing: 1) {
-            Text("\(entry.sgv)")
-                .font(.system(size: 22, weight: .bold, design: .rounded))
+            Text(entry.glucoseText)
+                .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                 .minimumScaleFactor(0.6)
                 .lineLimit(1)
             Text(entry.trendArrow)
@@ -574,14 +519,15 @@ struct GlucoseAccessoryRectangularWidget: Widget {
 
 private struct GlucoseAccessoryRectangularView: View {
     let entry: GlucoseWidgetEntry
+    @ScaledMetric(relativeTo: .largeTitle) private var glucoseSize: CGFloat = 24
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 4) {
                 // Left: glucose + arrow
                 HStack(alignment: .firstTextBaseline, spacing: 2) {
-                    Text("\(entry.sgv)")
-                        .font(.system(size: 24, weight: .bold, design: .rounded))
+                    Text(entry.glucoseText)
+                        .font(.system(size: glucoseSize, weight: .bold, design: .rounded))
                         .minimumScaleFactor(0.7)
                         .lineLimit(1)
                     Text(entry.trendArrow)
@@ -642,7 +588,7 @@ private struct GlucoseAccessoryInlineView: View {
     let entry: GlucoseWidgetEntry
 
     var body: some View {
-        Text("\(entry.sgv) \(entry.trendArrow) \(entry.deltaString)")
+        Text(entry.hasTimestamp ? "\(entry.glucoseText) \(entry.trendArrow) \(entry.deltaString)" : entry.glucoseText)
     }
 }
 

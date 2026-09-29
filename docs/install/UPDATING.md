@@ -1,3 +1,13 @@
+---
+title: "Updating ClearSugar Community"
+type: reference
+status: active
+tags:
+  - project/clearsugar-community
+  - domain/ai
+  - type/reference
+---
+
 # Updating ClearSugar Community
 
 ## Standard update (running from source)

@@ -16,6 +16,8 @@ jobs:
           node-version: '20'
           cache: 'npm'
       - run: npm ci
+      - name: Check tracked files for private data
+        run: python3 scripts/check-sanitization.py
       - name: Type check
         run: npx tsc --noEmit
       # No TZ pin: the suite is timezone-independent and must stay that way, so

@@ -27,7 +27,7 @@ struct GlucoseChartView: View {
 
     private var sortedReadings: [GlucoseReading] {
         glucoseHistory
-            .filter { $0.sgv > 0 && $0.sgv < 600 }
+            .filter { $0.isValid }
             .sorted { $0.date < $1.date }
     }
 

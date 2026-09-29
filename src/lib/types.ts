@@ -91,7 +91,7 @@ export interface NightscoutStatus {
 }
 
 /**
- * Pump state published to Nightscout `devicestatus` by the CT-110
+ * Pump state published to Nightscout `devicestatus` by the configured
  * `clearsugar-pumpstate` job (decoupled from tconnectsync). Carries the pump's
  * own IOB (for calibration) + the real Control-IQ settings the sync never wrote.
  * All fields optional — a missing/old doc must degrade gracefully to the

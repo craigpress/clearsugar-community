@@ -1,3 +1,13 @@
+---
+title: "ClearSugar Community — Docker stack"
+type: reference
+status: active
+tags:
+  - project/clearsugar-community
+  - domain/ai
+  - type/reference
+---
+
 # ClearSugar Community — Docker stack
 
 `docker-compose.yml` in this directory brings up the pieces ClearSugar reads
