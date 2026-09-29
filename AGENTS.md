@@ -53,7 +53,18 @@ Optional integrations:
   - All UI copy and LLM prompts must read patient identity from this profile at runtime.
   - When absent, fall back to the neutral phrase "the patient" and app title "ClearSugar".
 
-### Auth
+### Family meals
+
+- `profile/meals` stores named profiles and explicit parent/child account assignments.
+- Only current local owner accounts can manage profiles; owners can access all profiles.
+- Every meal/photo route checks the current user store and selected profile on the server.
+- The reserved `patient` profile uses the configured Nightscout instance. Other profiles
+  have isolated local journals and never write to that Nightscout. Demo mode never mirrors.
+- `MEAL_VISION_URL`, `MEAL_VISION_API_KEY`, `MEAL_VISION_MODEL` configure optional
+  OpenAI-compatible image/text estimates; human confirmation is required before carb writes.
+- iOS outboxes are scoped to the account and server; retries must retain that identity.
+
+### Authentication methods
 
 - Web: NextAuth v5 Credentials provider — username/password checked against `auth/users` (bcryptjs). Fail closed.
 - Machine clients (systemd timers, cron): `X-API-Key: $CLEARSUGAR_API_KEY`.

@@ -6,6 +6,50 @@ import Security
 final class AuthManager: NSObject {
     static let shared = AuthManager()
 
+    private var mealAccess: MealAccess?
+    var canLogMeals: Bool {
+        authMethod == .credentials && mealAccess?.allows(subject: username) == true
+    }
+
+    var mealChildren: [MealChild] {
+        mealAccess?.children ?? []
+    }
+    var defaultMealChildId: String { mealChildren.first?.id ?? "" }
+    var mealAccountKey: String? {
+        guard authMethod == .credentials, let username, let server = AppConfig.serverURL else { return nil }
+        return server.absoluteString + "|" + username.lowercased()
+    }
+    var canLogOwnMeals: Bool { canLogMeals && mealChildren.count == 1 }
+
+    func refreshMealAccess() async {
+        guard authMethod == .credentials, let subject = username else {
+            clearMealAccess()
+            return
+        }
+        do {
+            let result = try await APIClient.shared.fetchMealAccess()
+            guard authMethod == .credentials, username == subject else { return }
+            let jwt = Self.loadFromKeychain(service: AppConfig.jwtKeychainService)
+            let expiry = jwt.flatMap { decodeJWTPayload($0)?["exp"] as? TimeInterval } ?? 0
+            mealAccess = result.canLogMeals && result.sub == subject
+                ? MealAccess(sub: subject, expiresAt: Date(timeIntervalSince1970:
+                    min(expiry, Date().timeIntervalSince1970 + 24 * 60 * 60)), children: result.children)
+                : nil
+            MealAccess.save(mealAccess)
+        } catch {
+            guard authMethod == .credentials, username == subject else { return }
+            // Preserve an unexpired same-account permission only when offline.
+            if !(error is URLError) || mealAccess?.allows(subject: subject) != true {
+                clearMealAccess()
+            }
+        }
+    }
+
+    private func clearMealAccess() {
+        mealAccess = nil
+        MealAccess.save(nil)
+    }
+
     // Auth state
     var isAuthenticated: Bool { authMethod != .none }
     private(set) var authMethod: AuthMethod = .none
@@ -28,13 +72,15 @@ final class AuthManager: NSObject {
     private override init() {
         super.init()
         loadAuthState()
+        let saved = MealAccess.load()
+        if authMethod == .credentials, saved?.allows(subject: username) == true { mealAccess = saved }
+        else { clearMealAccess() }
     }
 
     // MARK: - Load Saved Auth
 
     private func loadAuthState() {
         if let jwt = Self.loadFromKeychain(service: AppConfig.jwtKeychainService) {
-            debugLog("[Auth] Found JWT in Keychain (\(jwt.prefix(20))...)")
             // Decode JWT to check expiry (without verifying signature — server does that)
             if let payload = decodeJWTPayload(jwt),
                let exp = payload["exp"] as? TimeInterval {
@@ -220,6 +266,7 @@ final class AuthManager: NSObject {
     // MARK: - Logout
 
     func logout() async {
+        clearMealAccess()
         Self.deleteFromKeychain(service: AppConfig.jwtKeychainService)
         Self.deleteFromKeychain(service: AppConfig.apiKeyKeychainService)
         Self.deleteFromKeychain(service: AppConfig.credentialsKeychainService)

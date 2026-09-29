@@ -20,7 +20,7 @@
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>NSCameraUsageDescription</key>
-	<string>ClearSugar needs camera access to scan the setup QR code from the web dashboard.</string>
+	<string>Scan setup QR codes or photograph meals for your meal log.</string>
 	<key>NSAlarmKitUsageDescription</key>
 	<string>ClearSugar sounds an alarm for urgent low glucose so it can't be missed, even in Silent mode.</string>
 	<key>NSLocalNetworkUsageDescription</key>
@@ -29,6 +29,10 @@
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
+		<key>NSCameraUsageDescription</key>
+		<string>Photograph meals to attach to your meal log.</string>
+		<key>NSPhotoLibraryUsageDescription</key>
+		<string>Choose meal photos for your meal log.</string>
 	</dict>
 </dict>
 </plist>

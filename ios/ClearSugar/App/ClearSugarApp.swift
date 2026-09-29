@@ -90,6 +90,7 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
+        let mealPrompt = MealPromptContext(userInfo: response.notification.request.content.userInfo)
         switch response.actionIdentifier {
         case "ACK":
             // Acknowledge — clear pending repeats AND tell the server. Before
@@ -106,6 +107,36 @@ class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDele
             await SnoozeManager.postSnooze(durationMinutes: 60)
         case "SNOOZE_RANGE":
             await SnoozeManager.postSnooze(untilRange: true)
+
+        case "MEAL_WITH_BOLUS":
+            if let mealPrompt {
+                await MealReplyManager.reply(.withBolus(episodeId: mealPrompt.episodeId))
+            }
+        case "MEAL_15_LATER":
+            if let mealPrompt {
+                await MealReplyManager.reply(.ateLater(episodeId: mealPrompt.episodeId))
+            }
+        case "MEAL_TEXT":
+            if let mealPrompt, let textResponse = response as? UNTextInputNotificationResponse {
+                await MealReplyManager.reply(
+                    .text(episodeId: mealPrompt.episodeId, text: textResponse.userText)
+                )
+            }
+        case "MEAL_PHOTO":
+            // .foreground action — park the context; ContentView presents the
+            // meal sheet once the scene is up.
+            if let mealPrompt {
+                await MainActor.run { MealNavigation.shared.present(mealPrompt) }
+            }
+        case UNNotificationDismissActionIdentifier:
+            if let mealPrompt {
+                await MealReplyManager.reply(.dismiss(episodeId: mealPrompt.episodeId))
+            }
+        case UNNotificationDefaultActionIdentifier:
+            // Plain tap on a meal prompt: open the sheet prefilled from userInfo.
+            if let mealPrompt {
+                await MainActor.run { MealNavigation.shared.present(mealPrompt) }
+            }
 
         default:
             break

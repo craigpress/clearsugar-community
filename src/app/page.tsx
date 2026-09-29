@@ -1,5 +1,6 @@
 "use client";
 
+import { FamilyMeals } from "@/components/meals/FamilyMeals";
 import { useState, useEffect, useMemo } from "react";
 import { useGlucose } from "@/lib/use-glucose";
 import { useTreatments } from "@/lib/use-treatments";
@@ -268,6 +269,8 @@ export default function Dashboard() {
                 <PumpStatusCard />
               </div>
             </div>
+
+            <FamilyMeals />
 
             <DataTable
               readings={readings}

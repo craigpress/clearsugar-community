@@ -14,6 +14,9 @@ struct ContentView: View {
     @State private var authManager = AuthManager.shared
     @ObservedObject private var store = GlucoseStore.shared
 
+    @State private var mealRoute: MealSheetRoute?
+    @State private var mealNavigation = MealNavigation.shared
+
     // Chart data
     @State private var glucoseHistory: [GlucoseReading] = []
     @State private var treatments: [Treatment] = []
@@ -54,6 +57,10 @@ struct ContentView: View {
                     reauthBanner
                 }
 
+                if authManager.canLogMeals {
+                    Button { mealRoute = .uncovered } label: { Label("Log meal or photo", systemImage: "camera.fill") }
+                        .padding(.vertical, 8)
+                }
                 if let reading, reading.isValid {
                     glucoseDisplay(reading)
                 } else if reading != nil {
@@ -71,6 +78,9 @@ struct ContentView: View {
             if let cached = store.cachedReading {
                 reading = cached
             }
+            await authManager.refreshMealAccess()
+            await MealOutbox.shared.process()
+            if authManager.canLogMeals, let pending = mealNavigation.pendingEpisode { mealRoute = .prompt(pending) }
             await refreshPatientProfile()
             await refreshChartData()
             await refresh()
@@ -82,11 +92,20 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active, store.minutesSinceLastFetch >= 1 {
                 Task {
+                    await authManager.refreshMealAccess()
+                    await MealOutbox.shared.process()
                     await refreshChartData()
                     await refresh()
                 }
                 startAutoRefresh()
             }
+        }
+        .onChange(of: authManager.canLogMeals) { _, allowed in if !allowed { mealRoute = nil } }
+        .onChange(of: mealNavigation.pendingEpisode) { _, pending in
+            if authManager.canLogMeals, let pending { mealRoute = .prompt(pending) }
+        }
+        .sheet(item: $mealRoute, onDismiss: { mealNavigation.clear() }) { route in
+            if authManager.canLogMeals { MealSheet(route: route) }
         }
         // chartTimeRange only controls the visible window, no re-fetch needed
     }

@@ -17,7 +17,7 @@ actor APIClient {
     private init() {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForResource = 150
         self.session = URLSession(configuration: config)
 
         // Load auth from Keychain: prefer Bearer JWT, fall back to API key
@@ -42,6 +42,22 @@ actor APIClient {
         } else if !apiKey.isEmpty {
             request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         }
+    }
+
+    private func applyMealAuth(to request: inout URLRequest) throws {
+        guard !bearerToken.isEmpty else { throw APIError.notPatient }
+        if let expected = MealRequestContext.accountKey {
+            let parts = bearerToken.split(separator: ".")
+            guard parts.count == 3 else { throw APIError.httpError(401) }
+            var raw = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
+            raw += String(repeating: "=", count: (4 - raw.count % 4) % 4)
+            guard let data = Data(base64Encoded: raw),
+                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let sub = payload["sub"] as? String,
+                  expected == (try baseURL.absoluteString) + "|" + sub.lowercased()
+            else { throw APIError.httpError(401) }
+        }
+        applyAuth(to: &request)
     }
 
     // MARK: - Retry
@@ -80,6 +96,270 @@ actor APIClient {
         default:
             return false
         }
+    }
+
+    struct MealAccessResponse: Decodable {
+        let sub: String
+        let canLogMeals: Bool
+        let children: [MealChild]?
+    }
+
+    func fetchMealAccess() async throws -> MealAccessResponse {
+        var request = URLRequest(url: try baseURL.appendingPathComponent("api/meals/access"))
+        try applyMealAuth(to: &request)
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw APIError.invalidResponse }
+        guard http.statusCode == 200 else { throw APIError.httpError(http.statusCode) }
+        return try JSONDecoder().decode(MealAccessResponse.self, from: data)
+    }
+
+    // MARK: - Meals
+
+    func logMeal(_ input: MealLogInput) async throws -> MealLog {
+        do {
+            return try await withRetry { try await performLogMeal(input) }
+        } catch let error as URLError where Self.isRetryableURLError(error) {
+            throw APIError.retryableRequest(error.localizedDescription)
+        }
+    }
+
+    private func performLogMeal(_ input: MealLogInput) async throws -> MealLog {
+        var request = URLRequest(url: try baseURL.appendingPathComponent("api/meals"))
+        request.httpMethod = "POST"
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(input)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        if http.statusCode == 502 {
+            throw APIError.retryableRequest("Nightscout write failed")
+        }
+        guard http.statusCode == 200 || http.statusCode == 201 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealResponse.self, from: data).meal
+    }
+
+    func fetchMeals(hours: Int) async throws -> [MealLog] {
+        try await withRetry { try await performMealsFetch(hours: hours) }
+    }
+
+    private func performMealsFetch(hours: Int) async throws -> [MealLog] {
+        var components = URLComponents(url: try baseURL.appendingPathComponent("api/meals"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name: "hours", value: "\(hours)")]
+        guard let url = components.url else {
+            throw APIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        guard http.statusCode == 200 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealsResponse.self, from: data).meals
+    }
+
+    func deleteMeal(id: String) async throws {
+        try await withRetry { try await performDeleteMeal(id: id) }
+    }
+
+    private func performDeleteMeal(id: String) async throws {
+        var request = URLRequest(url: try baseURL.appendingPathComponent("api/meals").appendingPathComponent(id))
+        request.httpMethod = "DELETE"
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (_, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        guard http.statusCode == 200 else {
+            throw APIError.httpError(http.statusCode)
+        }
+    }
+
+    // MARK: - Meal Episodes (Phase 2)
+
+    /// Answer a MEAL_PROMPT. Safe to retry: the server upserts the reply on the
+    /// episode. 404 means the episode is gone (expired and pruned) — the outbox
+    /// drops it rather than retrying forever.
+    func postMealReply(_ input: MealReplyInput) async throws -> MealEpisode {
+        do {
+            return try await withRetry { try await performEpisodePost(path: "api/meals/reply", body: input) }
+        } catch let error as URLError where Self.isRetryableURLError(error) {
+            throw APIError.retryableRequest(error.localizedDescription)
+        }
+    }
+
+    /// Record that eating just started. Idempotent on `clientId`, so a replayed
+    /// marker returns the same episode (200) instead of opening a second one.
+    func postEatingNow(_ input: EatingNowInput) async throws -> MealEpisode {
+        do {
+            return try await withRetry { try await performEpisodePost(path: "api/meals/eating", body: input) }
+        } catch let error as URLError where Self.isRetryableURLError(error) {
+            throw APIError.retryableRequest(error.localizedDescription)
+        }
+    }
+
+    private func performEpisodePost<Body: Encodable>(path: String, body: Body) async throws -> MealEpisode {
+        var request = URLRequest(url: try baseURL.appendingPathComponent(path))
+        request.httpMethod = "POST"
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        guard http.statusCode == 200 || http.statusCode == 201 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealEpisodeResponse.self, from: data).episode
+    }
+
+    func fetchMealEpisodes(hours: Int = 24) async throws -> [MealEpisode] {
+        try await withRetry { try await performEpisodesFetch(hours: hours) }
+    }
+
+    private func performEpisodesFetch(hours: Int) async throws -> [MealEpisode] {
+        var components = URLComponents(
+            url: try baseURL.appendingPathComponent("api/meals/episodes"),
+            resolvingAgainstBaseURL: false
+        )!
+        components.queryItems = [URLQueryItem(name: "hours", value: "\(hours)")]
+        guard let url = components.url else {
+            throw APIError.invalidResponse
+        }
+
+        var request = URLRequest(url: url)
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        guard http.statusCode == 200 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealEpisodesResponse.self, from: data).episodes
+    }
+
+    // MARK: - Meal Photo + Estimate (Phase 3)
+
+    /// Upload an already-downscaled, already-re-encoded JPEG (<= 1024 px long
+    /// edge, <= 1.5 MB — see MealPhotoEncoder). Deliberately NOT wrapped in
+    /// withRetry: re-sending ~1 MB three times on a bad connection is worse for
+    /// the user than one clear failure they can retry from the sheet.
+    func uploadMealPhoto(
+        clientId: String = UUID().uuidString.lowercased(),
+        imageData: Data,
+        takenAt: Date? = nil,
+        childId: String? = nil
+    ) async throws -> MealPhotoUpload {
+        var request = URLRequest(url: try baseURL.appendingPathComponent("api/meals/photo"))
+        request.httpMethod = "POST"
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Uploads are slower than the 15 s default this session was built with.
+        request.timeoutInterval = 60
+        if let childId { request.setValue(childId, forHTTPHeaderField: "X-Meal-Child") }
+
+        var body: [String: Any] = [
+            "clientId": clientId,
+            "imageBase64": imageData.base64EncodedString(),
+        ]
+        if let takenAt {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime]
+            body["takenAt"] = formatter.string(from: takenAt)
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        guard http.statusCode == 200 || http.statusCode == 201 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealPhotoUpload.self, from: data)
+    }
+
+    /// Ask the vision model for a nutrition estimate. One attempt only: 422 is a
+    /// verdict on the photo (retrying the same bytes yields the same answer) and
+    /// 502 means the provider is down, which the user should be told about
+    /// rather than waiting out three backoffs.
+    func estimateNutrition(photoId: String? = nil, description: String? = nil, childId: String? = nil, followUp: String? = nil, previousEstimate: NutritionEstimate? = nil) async throws -> NutritionEstimate {
+        var request = URLRequest(url: try baseURL.appendingPathComponent("api/meals/estimate"))
+        request.httpMethod = "POST"
+        try applyMealAuth(to: &request)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.timeoutInterval = 130
+        if let childId { request.setValue(childId, forHTTPHeaderField: "X-Meal-Child") }
+
+        var body: [String: Any] = [:]
+        if let followUp { body["followUp"] = followUp }
+        if let previousEstimate { body["previousEstimate"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(previousEstimate)) }
+        if let photoId { body["photoId"] = photoId }
+        if let description, !description.isEmpty { body["description"] = description }
+        guard !body.isEmpty else {
+            throw APIError.invalidData("An estimate needs a photo or a description")
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.invalidResponse
+        }
+        if http.statusCode == 403 {
+            throw APIError.notPatient
+        }
+        if http.statusCode == 422 {
+            throw APIError.mealEstimateFailed
+        }
+        if http.statusCode == 502 {
+            throw APIError.mealEstimateUnavailable
+        }
+        guard http.statusCode == 200 else {
+            throw APIError.httpError(http.statusCode)
+        }
+
+        return try JSONDecoder().decode(MealEstimateResponse.self, from: data).estimate
     }
 
     // MARK: - Fetch Latest
@@ -390,22 +670,37 @@ enum APIError: LocalizedError {
     case invalidResponse
     case httpError(Int)
     case invalidData(String)
+    case notPatient
+    case retryableRequest(String)
+    /// POST /api/meals/estimate returned 422 — the model's output failed
+    /// validation, i.e. it couldn't read the photo.
+    case mealEstimateFailed
+    /// POST /api/meals/estimate returned 502 — the vision provider is
+    /// unreachable.
+    case mealEstimateUnavailable
 
     var errorDescription: String? {
         switch self {
-        case .notConfigured:
-            return "No server configured. Enter your ClearSugar server URL in setup."
+        case .notConfigured: return "Enter your server URL in Settings."
         case .invalidResponse:
             return "Invalid response from server"
         case .httpError(let code):
             switch code {
-            case 401, 403: return "Authentication failed. Sign in again in Settings."
+            case 401, 403: return "Authentication failed. Check your API key in Settings."
             case 429: return "Too many requests. Retrying in a moment..."
             case 500...599: return "Server error. The ClearSugar backend may be down."
             default: return "Server error (HTTP \(code))"
             }
         case .invalidData(let detail):
             return "Invalid data received: \(detail)"
+        case .notPatient:
+            return "Sign in with an account assigned to this meal profile"
+        case .retryableRequest:
+            return "Couldn't log carbs right now. It will retry automatically."
+        case .mealEstimateFailed:
+            return "The model couldn't read that \u{2014} try another angle or describe it."
+        case .mealEstimateUnavailable:
+            return "The nutrition estimator is unavailable right now."
         }
     }
 
@@ -415,10 +710,53 @@ enum APIError: LocalizedError {
             return code == 429 || (500...599).contains(code)
         case .invalidResponse:
             return true
-        case .notConfigured, .invalidData:
+        case .retryableRequest:
+            return true
+        case .notConfigured, .invalidData, .notPatient, .mealEstimateFailed, .mealEstimateUnavailable:
             return false
         }
     }
+
+    var statusCode: Int? {
+        switch self {
+        case .httpError(let code):
+            return code
+        case .notPatient:
+            return 403
+        case .mealEstimateFailed:
+            return 422
+        case .mealEstimateUnavailable:
+            return 502
+        case .notConfigured, .invalidResponse, .invalidData, .retryableRequest:
+            return nil
+        }
+    }
+}
+
+private struct MealResponse: Decodable {
+    let meal: MealLog
+}
+
+private struct MealsResponse: Decodable {
+    let meals: [MealLog]
+}
+
+private struct MealEpisodeResponse: Decodable {
+    let episode: MealEpisode
+}
+
+private struct MealEpisodesResponse: Decodable {
+    let episodes: [MealEpisode]
+}
+
+private struct MealEstimateResponse: Decodable {
+    let estimate: NutritionEstimate
+}
+
+/// POST /api/meals/photo -> 201 { photoId, bytes }
+struct MealPhotoUpload: Decodable, Sendable {
+    let photoId: String
+    let bytes: Int?
 }
 
 // MARK: - Pump Status
@@ -460,4 +798,8 @@ struct PatientProfile: Codable, Sendable {
     let pump: String?
     let insulinNotes: String?
     let clinicalNotes: String?
+}
+
+enum MealRequestContext {
+    @TaskLocal static var accountKey: String?
 }

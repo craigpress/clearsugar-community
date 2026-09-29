@@ -181,7 +181,40 @@ final class AlertManager: ObservableObject {
             options: []
         )
 
-        center.setNotificationCategories([urgentCategory, warningCategory])
+        let mealText = UNTextInputNotificationAction(
+            identifier: "MEAL_TEXT",
+            title: "What did you eat?",
+            options: [],
+            textInputButtonTitle: "Send",
+            textInputPlaceholder: "Type or dictate"
+        )
+        let mealWithBolus = UNNotificationAction(
+            identifier: "MEAL_WITH_BOLUS",
+            title: "Ate with bolus",
+            options: []
+        )
+        let meal15Later = UNNotificationAction(
+            identifier: "MEAL_15_LATER",
+            title: "Ate 15+ min later",
+            options: []
+        )
+        // .foreground because the photo flow needs the camera and the meal sheet.
+        let mealPhoto = UNNotificationAction(
+            identifier: "MEAL_PHOTO",
+            title: "Add photo",
+            options: [.foreground]
+        )
+        // .customDismissAction so a swipe-away is reported and recorded as a
+        // "dismiss" reply — an ignored prompt and a declined one are different
+        // labels for Phase 4.
+        let mealPromptCategory = UNNotificationCategory(
+            identifier: "MEAL_PROMPT",
+            actions: [mealText, mealWithBolus, meal15Later, mealPhoto],
+            intentIdentifiers: [],
+            options: .customDismissAction
+        )
+
+        center.setNotificationCategories([urgentCategory, warningCategory, mealPromptCategory])
     }
 
     // MARK: - Evaluate Reading
