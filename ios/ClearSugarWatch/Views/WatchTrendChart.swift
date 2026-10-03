@@ -37,9 +37,11 @@ struct WatchTrendChart: View {
         return 350
     }
 
+    // Label only the range edges plus the top. 200 sits too close to 180 to
+    // label on a watch-height chart, so the top gets a label from 250 up.
     private var yAxisValues: [Double] {
-        var vals: [Double] = [30, 50, 120, 180]
-        if dynamicMax > 180 { vals.append(dynamicMax) }
+        var vals: [Double] = [rangeLow, rangeHigh]
+        if dynamicMax >= 250 { vals.append(dynamicMax) }
         return vals
     }
 
@@ -90,7 +92,15 @@ struct WatchTrendChart: View {
             .opacity(0)
         }
         .chartYScale(domain: fixedMin...dynamicMax)
-        .chartXAxis(.hidden)
+        // Reserve the same label row as the scrollable chart's x-axis so both
+        // plot areas share a height and the y labels line up with the data.
+        .chartXAxis {
+            AxisMarks(values: [0]) { _ in
+                AxisValueLabel("0")
+                    .font(.system(size: 11, design: .rounded))
+                    .foregroundStyle(.clear)
+            }
+        }
         .chartYAxis {
             AxisMarks(position: .leading, values: yAxisValues) { value in
                 AxisValueLabel {
