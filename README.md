@@ -282,6 +282,48 @@ The [`ios/`](ios/) directory contains a native iPhone + Apple Watch companion ap
 - **Yours end to end** — you build it in Xcode against **your** server; there is no App
   Store listing, no third-party service, and no telemetry.
 
+<img src="docs/screenshots/ios-iphone.jpg" alt="iPhone app, home-screen widgets with the compact Dynamic Island, and Lock Screen with the Live Activity and Lock Screen widgets" width="850">
+
+*Left to right: the app, home-screen widgets (small and medium) with the Live Activity in
+the compact Dynamic Island, and the Lock Screen with the Live Activity plus rectangular
+and circular Lock Screen widgets.*
+
+<img src="docs/screenshots/ios-dynamic-island.jpg" alt="Expanded Dynamic Island showing glucose, delta, 30-minute prediction, IOB/COB, and a 3-hour sparkline" width="600">
+
+<img src="docs/screenshots/ios-watch.jpg" alt="Apple Watch app with glucose chart, and the rectangular, circular, and inline watch complications" width="700">
+
+*Apple Watch app (left) and watch complications (right). iPhone and watch-app images are
+iOS 26.5 / watchOS 26.5 simulator captures against a `DEMO_MODE=true` server. The
+complications are the app's own complication views rendered with the same synthetic
+reading, outside a watch face.*
+
+### Background updates, Live Activities, and alert delivery
+
+- **Background refresh is best-effort.** iOS decides when a suspended app may run. The app
+  asks for a refresh every 5 minutes (backing off to 15 after failures), but iOS commonly
+  delays or skips these depending on battery, Low Power Mode, and how often you open the
+  app, and stops them entirely if you force-quit it. Home-screen widgets and watch
+  complications refresh on WidgetKit's own budget, so they can lag the latest reading.
+- **Live Activities stay current much longer.** With a paid developer account and server
+  push configured, the server updates the Live Activity directly over APNs on every new
+  reading, without waiting for the app to wake up. iOS still ends any Live Activity after
+  about 8 hours (it can then stay on the Lock Screen for up to 4 more). With
+  `LIVE_ACTIVITY_PUSH_TO_START=true`, the server restarts ended activities with
+  push-to-start (iOS 17.2+), so the card comes back without you opening the app. On a free account the Live Activity only updates when the app
+  itself runs.
+- **Alerts can come from the server.** Threshold and advisor alerts are evaluated on the
+  server and pushed to the app over APNs, so they don't depend on the app being awake.
+  The app's local alerts are only a backstop for when server pushes stop arriving. See
+  [docs/ALERTS.md](docs/ALERTS.md).
+- **Other alert services.** The author's private deployment also routes alerts through
+  Home Assistant, using its notification and acknowledgement flows. That integration
+  isn't in this repository; open an issue if you'd like it added as an optional sender.
+- **Critical alerts are in progress.** Urgent alerts already request iOS's critical
+  interruption level, but iOS honors it only for apps that Apple has granted the Critical
+  Alerts entitlement. Until that is granted, urgent alerts arrive as time-sensitive
+  notifications. They break through Focus but not Silent mode. On iOS 26+, the opt-in
+  AlarmKit urgent-low alarm already sounds through Silent mode.
+
 Requirements: an iPhone (iOS 17+), a Mac with Xcode 26+, and a free or paid Apple
 Developer account (a paid account is only needed for APNs push — polling, widgets, and
 alerts work on a free account). The setup wizard (step 7) writes the app's server

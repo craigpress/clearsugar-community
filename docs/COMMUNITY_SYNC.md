@@ -31,5 +31,6 @@ not a copied patient schedule or patient-specific insulin limit.
 
 All current README screenshots are actual community UI captures using `DEMO_MODE=true`
 with an isolated demo data directory and disabled external integrations. They contain generated
-data only. Replacing an image does not remove previous versions from Git history;
+data only. iOS images are simulator captures of the community app against such a server; the
+watch complication images render the app's complication views with the same synthetic reading. Replacing an image does not remove previous versions from Git history;
 history removal requires a coordinated rewrite and cannot revoke existing clones.
