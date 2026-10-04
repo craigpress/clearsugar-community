@@ -37,6 +37,30 @@ struct WatchTrendChart: View {
         return 350
     }
 
+    // Visible x-span, and the hour-label stride that keeps "10 PM"-width
+    // labels from colliding at watch width.
+    private var visibleSeconds: Double {
+        isScrollable ? sixHours : dataSpanSeconds
+    }
+
+    private var xLabelStrideHours: Int {
+        visibleSeconds > 4 * 3600 ? 2 : 1
+    }
+
+    /// Hour labels are centered on their tick, so one near either end of the
+    /// chart gets clipped ("PM", "7"). Skip ticks within this many seconds of
+    /// the first reading or the last plotted point.
+    private var xLabelEdgeMargin: Double {
+        visibleSeconds * 0.12
+    }
+
+    private func showsXLabel(at date: Date) -> Bool {
+        guard let first = dataPoints.first?.time,
+              let last = predictionPoints.last?.time ?? dataPoints.last?.time else { return true }
+        return date.timeIntervalSince(first) > xLabelEdgeMargin
+            && last.timeIntervalSince(date) > xLabelEdgeMargin
+    }
+
     // Label only the range edges plus the top. 200 sits too close to 180 to
     // label on a watch-height chart, so the top gets a label from 250 up.
     private var yAxisValues: [Double] {
@@ -186,10 +210,12 @@ struct WatchTrendChart: View {
         .chartYScale(domain: fixedMin...dynamicMax)
         .chartYAxis(.hidden)
         .chartXAxis {
-            AxisMarks(values: .stride(by: .hour, count: 1)) { _ in
-                AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .abbreviated)))
-                    .font(.system(size: 11, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.45))
+            AxisMarks(values: .stride(by: .hour, count: xLabelStrideHours)) { value in
+                if let date = value.as(Date.self), showsXLabel(at: date) {
+                    AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .abbreviated)))
+                        .font(.system(size: 11, design: .rounded))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
             }
         }
         .chartScrollableAxes(.horizontal)

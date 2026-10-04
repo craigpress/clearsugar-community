@@ -282,11 +282,11 @@ The [`ios/`](ios/) directory contains a native iPhone + Apple Watch companion ap
 - **Yours end to end** — you build it in Xcode against **your** server; there is no App
   Store listing, no third-party service, and no telemetry.
 
-<img src="docs/screenshots/ios-iphone.jpg" alt="iPhone app, home-screen widgets with the compact Dynamic Island, and Lock Screen with the Live Activity and Lock Screen widgets" width="850">
+<img src="docs/screenshots/ios-iphone.jpg" alt="iPhone app, home-screen widgets with the compact Dynamic Island, and Lock Screen with the Live Activity and inline, rectangular, and circular Lock Screen widgets" width="850">
 
 *Left to right: the app, home-screen widgets (small and medium) with the Live Activity in
-the compact Dynamic Island, and the Lock Screen with the Live Activity plus rectangular
-and circular Lock Screen widgets.*
+the compact Dynamic Island, and the Lock Screen with the Live Activity plus inline,
+rectangular, and circular Lock Screen widgets.*
 
 <img src="docs/screenshots/ios-dynamic-island.jpg" alt="Expanded Dynamic Island showing glucose, delta, 30-minute prediction, IOB/COB, and a 3-hour sparkline" width="600">
 

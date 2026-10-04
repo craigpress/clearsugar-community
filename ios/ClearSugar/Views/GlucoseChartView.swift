@@ -266,9 +266,11 @@ struct GlucoseChartView: View {
             AxisMarks(values: .stride(by: .hour, count: xAxisStride)) { value in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                     .foregroundStyle(Color.white.opacity(0.06))
-                AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .abbreviated)))
-                    .foregroundStyle(textSecondary)
-                    .font(.system(size: 11, design: .monospaced))
+                if let date = value.as(Date.self), showsXLabel(at: date) {
+                    AxisValueLabel(format: .dateTime.hour(.defaultDigits(amPM: .abbreviated)))
+                        .foregroundStyle(textSecondary)
+                        .font(.system(size: 11, design: .monospaced))
+                }
             }
         }
         .chartYAxis {
@@ -287,6 +289,9 @@ struct GlucoseChartView: View {
         .chartPlotStyle { plotArea in
             plotArea.background(Color.clear)
         }
+        // The top y label is centered on the domain edge; leave room for its
+        // upper half so .clipped() doesn't cut it.
+        .padding(.top, 8)
         .frame(height: 200)
         .clipped()
         .accessibilityElement(children: .ignore)
@@ -356,8 +361,10 @@ struct GlucoseChartView: View {
             AxisMarks(position: .leading, values: [0, 1, 2, 3]) { value in
                 AxisGridLine(stroke: StrokeStyle(lineWidth: 0.5))
                     .foregroundStyle(Color.white.opacity(0.04))
+                // 0 and 3 sit on the clipped edges of this 50pt strip and 3
+                // collides with the "U/hr" caption, so label 1 and 2 only.
                 AxisValueLabel {
-                    if let v = value.as(Int.self) {
+                    if let v = value.as(Int.self), v == 1 || v == 2 {
                         Text(String(format: "%3d", v))
                             .foregroundStyle(textSecondary.opacity(0.6))
                             .font(.system(size: 11, design: .monospaced))
@@ -388,6 +395,15 @@ struct GlucoseChartView: View {
         case 7...12: return 2
         default:     return 4
         }
+    }
+
+    /// Hour labels are centered on their tick; one near either end of the
+    /// chart is clipped or truncated to an ellipsis. Skip ticks within 7% of the
+    /// time range of either edge.
+    private func showsXLabel(at date: Date) -> Bool {
+        let margin = timeRange.upperBound.timeIntervalSince(timeRange.lowerBound) * 0.07
+        return date.timeIntervalSince(timeRange.lowerBound) > margin
+            && timeRange.upperBound.timeIntervalSince(date) > margin
     }
 
     private func clampGlucose(_ sgv: Int) -> Int {
