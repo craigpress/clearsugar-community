@@ -19,8 +19,9 @@ Images (`docs/screenshots/ios-iphone.jpg`, `ios-dynamic-island.jpg`, `ios-watch.
 captured in one pass at 209 mg/dL from a `DEMO_MODE=true` server. Watch complications are
 the app's complication views rendered with `ImageRenderer`, not on a watch face (the
 simulator could not download faces with complication slots). Privacy scan passed on each
-commit. Earlier 2026-09-29 state (meal profiles/photos, history rewrite, 584 web tests,
-CI `36589794731`) is carried forward unrechecked.
+commit. Earlier 2026-09-29 meal/profile and history-rewrite state, including CI `36589794731`, is carried forward without live deployment verification.
+
+Managed work Mac setup verified October 3 at `791fd75`: 584 web tests, TypeScript, production build, 52 Xcode 27 native tests, iOS/watchOS simulator Debug and unsigned physical-device Release builds, and sanitization scan passed. XcodeGen and a neutral ignored Server.xcconfig are available locally. At October 4 close, the clean checkout was fast-forwarded to `7ea4c17`, including `ba113e8` edge-label fixes/screenshots; these newly pulled changes were not rebuilt or retested on this Mac. The simulator/visual evidence above is carried from the other session, not a new check.
 
 ## Next
 
